@@ -1,0 +1,11 @@
+services:
+  wispertype-server:
+    build: .
+    ports:
+      - "19527:19527"
+    volumes:
+      - whisper-models:/app/backend/wispertype/models
+    restart: unless-stopped
+
+volumes:
+  whisper-models:

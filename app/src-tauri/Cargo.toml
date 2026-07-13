@@ -1,0 +1,28 @@
+[package]
+name = "wishper-type"
+version = "0.1.2"
+description = "Lightweight voice typing for any app"
+authors = ["you"]
+edition = "2021"
+
+[lib]
+name = "wishper_type_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arboard = "3"
+enigo = "0.2"
+reqwest = { version = "0.12", features = ["blocking"] }
+device_query = "4.0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+macos-accessibility-client = "0.0.1"
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication"] }

@@ -1,0 +1,5 @@
+blank_issues: false
+contact_links:
+  - name: Questions & discussions
+    url: https://github.com/utpalsinghdev/wishper-type/issues/new?template=question.yml
+    about: Ask a question or start a discussion

@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WishperType</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="capsule-wrap">
+    <!-- data-tauri-drag-region lets the user drag the whole pill -->
+    <div class="pill" id="pill" data-tauri-drag-region>
+
+      <!-- Left: microphone icon + animated pulse ring -->
+      <div class="mic-wrap" data-tauri-drag-region>
+        <div class="mic-ring"></div>
+        <svg class="mic-icon" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10a7 7 0 0 0 14 0"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="9"  y1="22" x2="15" y2="22"/>
+        </svg>
+      </div>
+
+      <!-- Center: waveform | dots | status | timer -->
+      <div class="center" data-tauri-drag-region>
+        <canvas id="viz"></canvas>
+        <div class="dots" id="dots">
+          <div class="dot-item"></div>
+          <div class="dot-item"></div>
+          <div class="dot-item"></div>
+        </div>
+        <div class="status-text" id="statusText"></div>
+        <div class="timer" id="timer">0:00</div>
+      </div>
+
+      <!-- Right: stop / send button -->
+      <button class="stop-btn hidden" id="stopBtn" title="Stop &amp; paste (Enter)">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="white">
+          <rect x="1" y="1" width="8" height="8" rx="2"/>
+        </svg>
+      </button>
+
+    </div>
+  </div>
+  <script type="module" src="main.js"></script>
+</body>
+</html>

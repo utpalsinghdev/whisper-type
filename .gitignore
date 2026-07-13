@@ -1,0 +1,67 @@
+# ── Python ──────────────────────────────────────────────────────────
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+pip-wheel-metadata/
+
+# ── Node ────────────────────────────────────────────────────────────
+node_modules/
+app/node_modules/
+npm-debug.log*
+
+# ── Rust / Tauri build ──────────────────────────────────────────────
+app/src-tauri/target/
+**/target/
+app/src-tauri/gen/
+
+# ── Whisper models (downloaded on first use, NOT shipped in repo) ────
+backend/wispertype/models/
+backend/wispertype/models/**
+*.pt
+*.pt.part
+
+# Whisper download cache (user machine only)
+.cache/
+
+# ── Release / installer artifacts ───────────────────────────────────
+*.dmg
+*.app
+*.msi
+*.exe
+*.deb
+*.AppImage
+dist/
+bundle/
+releases/*
+!releases/README.md
+!releases/.gitkeep
+!releases/mac/
+!releases/mac/.gitkeep
+!releases/mac/README.md
+!releases/windows/
+!releases/windows/.gitkeep
+!releases/windows/README.md
+
+# ── OS / editor ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ── Logs ────────────────────────────────────────────────────────────
+*.log
+
+# ── Local scripts / scratch ─────────────────────────────────────────
+resume.sh
+
+# ── User runtime config (created by the app, not part of source) ────
+# macOS: ~/Library/Application Support/com.wishper.type/
+# Linux: ~/.config/com.wishper.type/
+# Windows: %APPDATA%\com.wishper.type\

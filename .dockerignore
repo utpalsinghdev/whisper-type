@@ -1,0 +1,13 @@
+.venv
+venv
+node_modules
+app/node_modules
+app/src-tauri/target
+**/__pycache__
+.git
+.DS_Store
+*.dmg
+*.app
+releases/*
+backend/wispertype/models/*.pt
+backend/wispertype/models/*.pt.part

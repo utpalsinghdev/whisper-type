@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WishperType</title>
+  <style>
+    /* ── reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+                   system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: #0c0c0e;
+      color: #e4e4e7;
+      padding: 0;
+      height: 100vh;
+      overflow-y: auto;
+      overflow-x: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* ── scrollable content area ── */
+    .page {
+      padding: 22px 20px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    /* ── header ── */
+    .logo-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #7c3aed, #a855f7);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .logo-icon svg { color: #fff; }
+    h1 {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #f4f4f5;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: #71717a;
+      margin-bottom: 18px;
+      margin-left: 42px;
+      line-height: 1.4;
+    }
+
+    /* ── section label ── */
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #52525b;
+      margin: 14px 0 6px;
+    }
+
+    /* ── card ── */
+    .card {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 12px;
+      padding: 13px 14px;
+      margin-bottom: 8px;
+    }
+
+    /* permission card head */
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 5px;
+    }
+    .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #e4e4e7;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+    .card-title svg { color: #71717a; flex-shrink: 0; }
+    .card-desc {
+      font-size: 11.5px;
+      color: #71717a;
+      margin-bottom: 10px;
+      line-height: 1.4;
+    }
+
+    /* status badge */
+    .badge {
+      font-size: 10.5px;
+      font-weight: 600;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: #27272a;
+      color: #71717a;
+      white-space: nowrap;
+    }
+    .badge.ok  { background: rgba(34, 197, 94, 0.15);  color: #4ade80; }
+    .badge.bad { background: rgba(239, 68, 68, 0.14);  color: #f87171; }
+
+    /* button row */
+    .btns { display: flex; gap: 7px; flex-wrap: wrap; }
+
+    button {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 7px 13px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #27272a;
+      color: #d4d4d8;
+      transition: background 0.15s ease, opacity 0.15s ease;
+      line-height: 1;
+    }
+    button:hover:not(:disabled) { background: #3f3f46; }
+    button.primary {
+      background: #7c3aed;
+      color: #fff;
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) { background: #6d28d9; }
+    button:disabled { opacity: 0.38; cursor: default; }
+
+    /* ── position grid ── */
+    .pos-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 40px);
+      grid-template-rows: repeat(3, 40px);
+      gap: 5px;
+    }
+    .pos-grid button {
+      width: 40px;
+      height: 40px;
+      padding: 0;
+      font-size: 15px;
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .pos-grid button.active { background: #7c3aed; color: #fff; }
+
+    /* ── model selector ── */
+    .model-btns {
+      display: flex;
+      gap: 7px;
+    }
+    .model-btns button {
+      flex: 1;
+      text-align: center;
+      padding: 9px 8px;
+      border-radius: 10px;
+      line-height: 1.3;
+    }
+    .model-btns button small {
+      display: block;
+      font-size: 10px;
+      opacity: 0.6;
+      font-weight: 400;
+      margin-top: 2px;
+    }
+    .model-btns button.active {
+      background: #7c3aed;
+      color: #fff;
+    }
+    .hotkey-current {
+      font-size: 12px;
+      color: #a1a1aa;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .model-note {
+      font-size: 11px;
+      color: #71717a;
+      margin-top: 9px;
+      min-height: 14px;
+      line-height: 1.4;
+    }
+
+    /* ── theme swatches ── */
+    .swatches {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .swatch {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+      border: 2.5px solid transparent;
+      transition: border-color 0.15s ease, transform 0.12s ease;
+    }
+    .swatch:hover   { transform: scale(1.10); }
+    .swatch.active  { border-color: #f4f4f5; }
+
+    /* ── mic select ── */
+    select {
+      width: 100%;
+      font-size: 12.5px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: #27272a;
+      color: #e4e4e7;
+      border: 1px solid #3f3f46;
+      cursor: pointer;
+      outline: none;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    select:focus { border-color: #7c3aed; }
+
+    /* ── progress bar (model download) ── */
+    .progress-wrap {
+      height: 4px;
+      background: #27272a;
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 8px;
+      display: none;
+    }
+    .progress-wrap.visible { display: block; }
+    .progress-bar {
+      height: 100%;
+      background: #7c3aed;
+      border-radius: 999px;
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    /* ── footer ── */
+    .footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 6px;
+      padding-top: 14px;
+      border-top: 1px solid #1f1f22;
+    }
+    .hotkey {
+      font-size: 11.5px;
+      color: #52525b;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    kbd {
+      background: #27272a;
+      border: 1px solid #3f3f46;
+      border-radius: 5px;
+      padding: 1px 6px;
+      font-size: 11px;
+      font-family: inherit;
+      color: #a1a1aa;
+    }
+    #doneBtn {
+      background: #3f3f46;
+      color: #e4e4e7;
+      padding: 8px 18px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 10px;
+    }
+    #doneBtn.ready {
+      background: #7c3aed;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+
+    <!-- Header -->
+    <div class="logo-row">
+      <div class="logo-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2" width="6" height="12" rx="3"/>
+          <path d="M5 10a7 7 0 0 0 14 0"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+          <line x1="9"  y1="22" x2="15" y2="22"/>
+        </svg>
+      </div>
+      <h1>WishperType</h1>
+    </div>
+    <p class="subtitle">Local voice typing — press the hotkey, speak, and it pastes.</p>
+
+    <!-- ── Permissions ── -->
+    <div class="section-label">Permissions</div>
+
+    <!-- Microphone -->
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="2" width="6" height="12" rx="3"/>
+            <path d="M5 10a7 7 0 0 0 14 0"/>
+            <line x1="12" y1="19" x2="12" y2="22"/>
+          </svg>
+          Microphone
+        </span>
+        <span class="badge" id="micStatus">Checking…</span>
+      </div>
+      <div class="card-desc">Required to record your voice.</div>
+      <div class="btns">
+        <button class="primary" id="micRequest">Grant access</button>
+        <button id="micRecheck">Re-check</button>
+        <button id="micSettings">Open System Settings</button>
+      </div>
+    </div>
+
+    <!-- Accessibility -->
+    <div class="card">
+      <div class="card-head">
+        <span class="card-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/>
+            <path d="M12 8v4l3 3"/>
+          </svg>
+          Accessibility
+        </span>
+        <span class="badge" id="axStatus">Checking…</span>
+      </div>
+      <div class="card-desc">Required to paste transcribed text into other apps. After enabling WishperType in System Settings, tap Re-check.</div>
+      <div class="btns">
+        <button class="primary" id="axRequest">Grant access</button>
+        <button id="axRecheck">Re-check</button>
+        <button id="axSettings">Open System Settings</button>
+      </div>
+    </div>
+
+    <!-- ── Device ── -->
+    <div class="section-label">Device</div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a3 3 0 0 1 3 3v4a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="22"/>
+        </svg>
+        Microphone input
+      </div>
+      <select id="micSelect">
+        <option value="">System default</option>
+      </select>
+    </div>
+
+    <!-- ── Shortcut ── -->
+    <div class="section-label">Shortcut</div>
+
+    <div class="card">
+      <div class="card-desc" style="margin-bottom:10px;">
+        Choose any global hotkey. Double-tap ⌘ works, or combine ⌘ with another key (e.g. ⌘+J).
+      </div>
+      <div class="hotkey-current">
+        Current: <kbd id="hotkeyDisplay">…</kbd>
+      </div>
+      <div class="btns">
+        <button id="hotkeyRecord" class="primary">Create your own shortcut…</button>
+      </div>
+      <div class="model-note" id="hotkeyNote"></div>
+    </div>
+
+    <!-- ── Transcription model ── -->
+    <div class="section-label">Model</div>
+
+    <div class="card">
+      <div class="card-desc" style="margin-bottom:10px;">
+        Larger models are more accurate but take longer to transcribe.
+      </div>
+      <div class="model-btns" id="modelGroup">
+        <button data-model="tiny.en">Tiny<small>Fastest</small></button>
+        <button data-model="base.en">Base<small>Recommended</small></button>
+        <button data-model="small.en">Small<small>Most accurate</small></button>
+      </div>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="model-note" id="modelNote"></div>
+    </div>
+
+    <!-- ── Appearance ── -->
+    <div class="section-label">Appearance</div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:10px;">Accent color</div>
+      <div class="swatches" id="themeGroup">
+        <div class="swatch" data-theme="purple" style="background:#a855f7"  title="Purple"></div>
+        <div class="swatch" data-theme="blue"   style="background:#3b82f6"  title="Blue"></div>
+        <div class="swatch" data-theme="green"  style="background:#22c55e"  title="Green"></div>
+        <div class="swatch" data-theme="pink"   style="background:#ec4899"  title="Pink"></div>
+        <div class="swatch" data-theme="amber"  style="background:#f59e0b"  title="Amber"></div>
+      </div>
+    </div>
+
+    <!-- ── Capsule position ── -->
+    <div class="section-label">Capsule position</div>
+
+    <div class="card">
+      <div class="card-desc" style="margin-bottom:10px;">
+        Where the capsule appears on screen. You can also drag it to any position.
+      </div>
+      <div class="pos-grid" id="posGroup">
+        <button data-pos="top-left">↖</button>
+        <button data-pos="top-center">↑</button>
+        <button data-pos="top-right">↗</button>
+        <button data-pos="center-left">←</button>
+        <button data-pos="center-center">·</button>
+        <button data-pos="center-right">→</button>
+        <button data-pos="bottom-left">↙</button>
+        <button data-pos="bottom-center">↓</button>
+        <button data-pos="bottom-right">↘</button>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <span class="hotkey">
+        Hotkey: <kbd id="hotkeyLabel">⌘⇧R</kbd>
+      </span>
+      <button id="doneBtn">Done</button>
+    </div>
+
+  </div><!-- .page -->
+  <script type="module" src="setup.js"></script>
+</body>
+</html>

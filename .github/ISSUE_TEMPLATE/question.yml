@@ -1,0 +1,24 @@
+name: Question
+description: Ask a question or get help setting up
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      placeholder: e.g. How do I run WishperType on Windows?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - Not sure
+    validations:
+      required: false
