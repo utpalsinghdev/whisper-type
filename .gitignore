@@ -22,8 +22,11 @@ app/src-tauri/gen/
 # ── Whisper models (downloaded on first use, NOT shipped in repo) ────
 backend/wispertype/models/
 backend/wispertype/models/**
+backend/nestjs/models/
+backend/nestjs/tmp/
 *.pt
 *.pt.part
+ggml-*.bin
 
 # Whisper download cache (user machine only)
 .cache/

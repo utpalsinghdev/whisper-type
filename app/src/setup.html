@@ -372,6 +372,24 @@
       </select>
     </div>
 
+    <!-- ── Backend (remote VPS / local) ── -->
+    <div class="section-label">Backend</div>
+
+    <div class="card">
+      <div class="card-desc" style="margin-bottom:10px;">
+        Run Whisper on a VPS (recommended) so it doesn’t eat Mac RAM. Use Local only for offline Python.
+      </div>
+      <div class="model-btns" id="backendModeGroup" style="margin-bottom:12px;">
+        <button type="button" data-mode="remote">Remote<small>VPS / Docker</small></button>
+        <button type="button" data-mode="local">Local<small>Python on Mac</small></button>
+      </div>
+      <label class="card-desc" for="backendUrl" style="display:block;margin-bottom:6px;">Backend URL</label>
+      <input id="backendUrl" type="url" placeholder="http://127.0.0.1:3000" style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
+      <label class="card-desc" for="apiKeyInput" style="display:block;margin-bottom:6px;">API key (optional)</label>
+      <input id="apiKeyInput" type="password" placeholder="Same as API_KEY on the server" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
+      <div class="model-note" id="backendNote"></div>
+    </div>
+
     <!-- ── Shortcut ── -->
     <div class="section-label">Shortcut</div>
 

@@ -43,7 +43,8 @@ let timerInterval  = null;
 let elapsedSeconds = 0;
 
 // ── Settings (fetched per session) ────────────────────────────────
-let apiBase   = "http://127.0.0.1:19527";
+let apiBase   = "http://127.0.0.1:3000";
+let apiKey    = "";
 let modelName = "base.en";
 let micDevice = "";
 let themeKey  = "purple";   // default matches new purple accent
@@ -266,21 +267,25 @@ async function transcribeRecording() {
 
   const pcm  = mergeRecording();
   const form = new FormData();
-  form.append("model_name", `${modelName}.pt`);
+  form.append("model_name", modelName);
   form.append(
     "files",
     new Blob([pcm.buffer], { type: "application/octet-stream" }),
     "audio.pcm"
   );
 
+  const headers = {};
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
     const res = await fetch(`${apiBase}/transcribe_pcm_chunk`, {
-      method: "POST",
-      body:   form,
-      signal: controller.signal,
+      method:  "POST",
+      body:    form,
+      headers,
+      signal:  controller.signal,
     });
     if (!res.ok) throw new Error(`Transcription error (HTTP ${res.status})`);
 
@@ -316,12 +321,14 @@ async function startSession() {
       const settings = await invoke("get_settings");
       modelName = settings.model     || "base.en";
       micDevice = settings.mic_device || "";
+      apiKey    = settings.api_key    || "";
       applyTheme(settings.theme);
     } catch { /* use defaults */ }
 
-    // Ensure server is alive (no-op if already running)
+    // Ensure server is alive (remote health-check, or spawn local Python)
     await invoke("ensure_server");
     apiBase = await invoke("api_base");
+    try { apiKey = await invoke("get_api_key") || apiKey; } catch { /* ignore */ }
 
     // Open microphone
     const audioConstraint = micDevice ? { deviceId: { exact: micDevice } } : true;

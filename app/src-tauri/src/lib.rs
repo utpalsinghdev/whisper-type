@@ -145,6 +145,23 @@ struct AppSettings {
     /// When false, global hotkey listeners are unregistered.
     #[serde(default = "default_hotkey_enabled")]
     hotkey_enabled: bool,
+    /// "remote" (VPS / Docker NestJS) or "local" (spawn Python on this machine).
+    #[serde(default = "default_backend_mode")]
+    backend_mode: String,
+    /// Base URL for the remote NestJS backend, e.g. "http://127.0.0.1:3000".
+    #[serde(default = "default_backend_url")]
+    backend_url: String,
+    /// Optional shared secret sent as X-API-Key.
+    #[serde(default)]
+    api_key: String,
+}
+
+fn default_backend_mode() -> String {
+    "remote".into()
+}
+
+fn default_backend_url() -> String {
+    "http://127.0.0.1:3000".into()
 }
 
 impl Default for AppSettings {
@@ -155,8 +172,15 @@ impl Default for AppSettings {
             mic_device: String::new(),
             hotkey: default_hotkey(),
             hotkey_enabled: true,
+            backend_mode: default_backend_mode(),
+            backend_url: default_backend_url(),
+            api_key: String::new(),
         }
     }
+}
+
+fn using_remote_backend(settings: &AppSettings) -> bool {
+    settings.backend_mode != "local"
 }
 
 fn settings_path(app: &AppHandle) -> PathBuf {
@@ -255,14 +279,25 @@ fn python_binary(root: &PathBuf) -> PathBuf {
     PathBuf::from("python3")
 }
 
+fn http_healthy(url: &str) -> bool {
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(3))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    client.get(url).send().map(|r| r.status().is_success()).unwrap_or(false)
+}
+
 fn server_healthy() -> bool {
     let url = format!("http://127.0.0.1:{API_PORT}/health");
-    reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .and_then(|c| c.get(&url).send())
-        .map(|r| r.status().is_success())
-        .unwrap_or(false)
+    http_healthy(&url)
+}
+
+fn remote_backend_healthy(base: &str) -> bool {
+    let base = base.trim_end_matches('/');
+    http_healthy(&format!("{base}/health"))
 }
 
 fn process_command(pid: i32) -> Option<String> {
@@ -595,6 +630,23 @@ fn bootstrap_model(root: &PathBuf, python: &PathBuf) -> Result<(), String> {
 }
 
 fn spawn_transcription_server(app: &AppHandle, state: &State<AppState>) -> Result<(), String> {
+    let settings = load_settings(app);
+    if using_remote_backend(&settings) {
+        let base = settings.backend_url.trim().trim_end_matches('/');
+        if base.is_empty() {
+            return Err("Remote backend URL is empty — set it in Settings".into());
+        }
+        // Do not spawn local Python/Whisper — frees Mac RAM.
+        state.server_managed.store(false, Ordering::SeqCst);
+        state.server_external.store(true, Ordering::SeqCst);
+        if remote_backend_healthy(base) {
+            return Ok(());
+        }
+        return Err(format!(
+            "Remote backend not reachable at {base}/health — is Docker/VPS running?"
+        ));
+    }
+
     let mut guard = state.server.lock().map_err(|e| e.to_string())?;
 
     if let Some(child) = guard.as_mut() {
@@ -687,8 +739,48 @@ fn spawn_transcription_server(app: &AppHandle, state: &State<AppState>) -> Resul
 }
 
 #[tauri::command]
-fn api_base() -> String {
-    format!("http://127.0.0.1:{API_PORT}")
+fn api_base(app: AppHandle) -> String {
+    let settings = load_settings(&app);
+    if using_remote_backend(&settings) {
+        settings.backend_url.trim().trim_end_matches('/').to_string()
+    } else {
+        format!("http://127.0.0.1:{API_PORT}")
+    }
+}
+
+#[tauri::command]
+fn get_api_key(app: AppHandle) -> String {
+    load_settings(&app).api_key
+}
+
+#[tauri::command]
+fn set_backend_mode(app: AppHandle, mode: String) {
+    let mut settings = load_settings(&app);
+    settings.backend_mode = if mode == "local" {
+        "local".into()
+    } else {
+        "remote".into()
+    };
+    save_settings(&app, &settings);
+    if using_remote_backend(&settings) {
+        if let Some(state) = app.try_state::<AppState>() {
+            stop_transcription_server(&state);
+        }
+    }
+}
+
+#[tauri::command]
+fn set_backend_url(app: AppHandle, url: String) {
+    let mut settings = load_settings(&app);
+    settings.backend_url = url.trim().trim_end_matches('/').to_string();
+    save_settings(&app, &settings);
+}
+
+#[tauri::command]
+fn set_api_key(app: AppHandle, key: String) {
+    let mut settings = load_settings(&app);
+    settings.api_key = key;
+    save_settings(&app, &settings);
 }
 
 #[tauri::command]
@@ -886,6 +978,23 @@ struct ModelProgress {
 
 #[tauri::command]
 fn ensure_model(app: AppHandle, model: String) -> Result<(), String> {
+    let settings = load_settings(&app);
+    if using_remote_backend(&settings) {
+        // Models live on the VPS; just remember the preference for the next request.
+        set_model(app.clone(), model.clone());
+        refresh_tray(&app);
+        let _ = app.emit(
+            "model-progress",
+            ModelProgress {
+                model,
+                pct: 100,
+                done: true,
+                error: None,
+            },
+        );
+        return Ok(());
+    }
+
     let root = repo_root();
     let target = root.join(format!("backend/wispertype/models/{model}.pt"));
 
@@ -1064,7 +1173,6 @@ fn ensure_server(app: AppHandle, state: State<AppState>) -> Result<(), String> {
 fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
     let trimmed = text.trim().to_string();
     if trimmed.is_empty() {
-        // Nothing to paste; just release focus back to the previous app.
         if let Some(win) = app.get_webview_window("capsule") {
             let _ = win.hide();
         }
@@ -1076,12 +1184,10 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         return Ok(());
     }
 
-    // Put the text on the clipboard before we give focus back.
     let mut clipboard = Clipboard::new().map_err(|e| e.to_string())?;
     clipboard.set_text(&trimmed).map_err(|e| e.to_string())?;
 
-    // Hide the capsule so macOS returns keyboard focus to the app the user
-    // was typing in. Without this, Cmd+V lands on our own window.
+    // Hide capsule first so we are not the key window when Cmd+V fires.
     if let Some(win) = app.get_webview_window("capsule") {
         let _ = win.hide();
     }
@@ -1091,8 +1197,6 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         }
     }
 
-    // Re-activate the app that was frontmost before we started recording, so
-    // the paste lands exactly where the user was typing.
     #[cfg(target_os = "macos")]
     {
         let pid = app
@@ -1103,8 +1207,22 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         }
     }
 
-    // Give the OS a moment to restore focus to the previous frontmost app.
-    thread::sleep(Duration::from_millis(250));
+    // Focus restore is flaky if we paste too early; wait then re-assert clipboard.
+    thread::sleep(Duration::from_millis(350));
+    if let Err(e) = clipboard.set_text(&trimmed) {
+        eprintln!("WishperType: clipboard re-set failed: {e}");
+    }
+    thread::sleep(Duration::from_millis(150));
+
+    #[cfg(target_os = "macos")]
+    {
+        // AppleScript Cmd+V is more reliable than enigo on macOS (avoids bare "v").
+        // Requires Accessibility permission — same as the rest of the paste flow.
+        if paste_via_osascript().is_ok() {
+            return Ok(());
+        }
+        eprintln!("WishperType: osascript paste failed; falling back to enigo");
+    }
 
     let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
 
@@ -1113,9 +1231,11 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         enigo
             .key(Key::Meta, Direction::Press)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(80));
         enigo
             .key(Key::Unicode('v'), Direction::Click)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(80));
         enigo
             .key(Key::Meta, Direction::Release)
             .map_err(|e| e.to_string())?;
@@ -1126,9 +1246,11 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         enigo
             .key(Key::Control, Direction::Press)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(40));
         enigo
             .key(Key::Unicode('v'), Direction::Click)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(40));
         enigo
             .key(Key::Control, Direction::Release)
             .map_err(|e| e.to_string())?;
@@ -1139,15 +1261,33 @@ fn paste_text(app: AppHandle, text: String) -> Result<(), String> {
         enigo
             .key(Key::Control, Direction::Press)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(40));
         enigo
             .key(Key::Unicode('v'), Direction::Click)
             .map_err(|e| e.to_string())?;
+        thread::sleep(Duration::from_millis(40));
         enigo
             .key(Key::Control, Direction::Release)
             .map_err(|e| e.to_string())?;
     }
 
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn paste_via_osascript() -> Result<(), String> {
+    let status = Command::new("osascript")
+        .args([
+            "-e",
+            "tell application \"System Events\" to keystroke \"v\" using command down",
+        ])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("osascript exited with {status}"))
+    }
 }
 
 #[tauri::command]
@@ -1486,6 +1626,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             api_base,
+            get_api_key,
             ensure_server,
             paste_text,
             hide_capsule,
@@ -1500,6 +1641,9 @@ pub fn run() {
             set_model,
             set_mic,
             set_hotkey,
+            set_backend_mode,
+            set_backend_url,
+            set_api_key,
             report_mics,
             ensure_model
         ])

@@ -473,6 +473,51 @@ async function loadPos() {
 }
 
 // ─────────────────────────────────────────────────────────────────
+//  Backend (remote / local)
+// ─────────────────────────────────────────────────────────────────
+const backendModeGroup = document.getElementById("backendModeGroup");
+const backendUrlInput  = document.getElementById("backendUrl");
+const apiKeyInput      = document.getElementById("apiKeyInput");
+const backendNote      = document.getElementById("backendNote");
+
+function markBackendMode(mode) {
+  const m = mode === "local" ? "local" : "remote";
+  backendModeGroup.querySelectorAll("button").forEach(b =>
+    b.classList.toggle("active", b.dataset.mode === m));
+  const remote = m === "remote";
+  backendUrlInput.disabled = !remote;
+  apiKeyInput.disabled = !remote;
+}
+
+backendModeGroup.querySelectorAll("button").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const mode = btn.dataset.mode;
+    markBackendMode(mode);
+    invoke("set_backend_mode", { mode }).catch(() => {});
+    backendNote.textContent = mode === "remote"
+      ? "Whisper runs on the VPS — Mac stays light."
+      : "Local mode spawns Python Whisper on this Mac (high RAM).";
+    backendNote.style.color = "";
+  });
+});
+
+let backendUrlTimer = null;
+backendUrlInput.addEventListener("input", () => {
+  clearTimeout(backendUrlTimer);
+  backendUrlTimer = setTimeout(() => {
+    invoke("set_backend_url", { url: backendUrlInput.value.trim() }).catch(() => {});
+  }, 400);
+});
+
+let apiKeyTimer = null;
+apiKeyInput.addEventListener("input", () => {
+  clearTimeout(apiKeyTimer);
+  apiKeyTimer = setTimeout(() => {
+    invoke("set_api_key", { key: apiKeyInput.value }).catch(() => {});
+  }, 400);
+});
+
+// ─────────────────────────────────────────────────────────────────
 //  Model selector + download
 // ─────────────────────────────────────────────────────────────────
 const modelGroup   = document.getElementById("modelGroup");
@@ -602,11 +647,17 @@ async function loadSettings() {
     markTheme(s.theme     || "purple");
     selectedMic = s.mic_device || "";
     paintHotkey(s.hotkey || "CommandOrControl+Shift+Space");
+    markBackendMode(s.backend_mode || "remote");
+    backendUrlInput.value = s.backend_url || "http://127.0.0.1:3000";
+    apiKeyInput.value = s.api_key || "";
   } catch {
     markModel("base.en");
     markTheme("purple");
     selectedMic = "";
     paintHotkey("CommandOrControl+Shift+Space");
+    markBackendMode("remote");
+    backendUrlInput.value = "http://127.0.0.1:3000";
+    apiKeyInput.value = "";
   }
   await loadMics();
 }
