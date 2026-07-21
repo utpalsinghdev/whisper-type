@@ -6,29 +6,35 @@ services:
     container_name: wishpertype-backend
     restart: unless-stopped
     ports:
-      - "${BACKEND_PORT:-3000}:3000"
+      - "${BACKEND_PORT:-3003}:3003"
     environment:
       - NODE_ENV=production
-      - PORT=3000
+      - PORT=3003
       - HOST=0.0.0.0
       - API_KEY=${API_KEY:-}
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      - SESSION_SECRET=${SESSION_SECRET:-change-me-in-production}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - DATABASE_PATH=/app/data/wishpertype.db
+      - DATABASE_URL=file:/app/data/wishpertype.db
+      - WHISPER_MODEL=${WHISPER_MODEL:-medium.en}
       - WHISPER_MODEL_PATH=/app/models
       - WHISPER_THREADS=${WHISPER_THREADS:-4}
       - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
-      - CORS_ORIGIN=${CORS_ORIGIN:-tauri://localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3000}
+      - CORS_ORIGIN=${CORS_ORIGIN:-tauri://localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3003}
       - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-26214400}
       - TRANSCRIBE_TIMEOUT_MS=${TRANSCRIBE_TIMEOUT_MS:-300000}
     volumes:
       - whisper_models:/app/models
       - whisper_tmp:/app/tmp
+      - whisper_data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3003/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 120s
+      start_period: 300s
 
 volumes:
   whisper_models:
   whisper_tmp:
+  whisper_data:

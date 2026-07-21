@@ -643,20 +643,20 @@ setInterval(() => {
 async function loadSettings() {
   try {
     const s = await invoke("get_settings");
-    markModel(s.model     || "base.en");
+    markModel(s.model     || "medium.en");
     markTheme(s.theme     || "purple");
     selectedMic = s.mic_device || "";
     paintHotkey(s.hotkey || "CommandOrControl+Shift+Space");
     markBackendMode(s.backend_mode || "remote");
-    backendUrlInput.value = s.backend_url || "http://127.0.0.1:3000";
+    backendUrlInput.value = s.backend_url || "http://127.0.0.1:3003";
     apiKeyInput.value = s.api_key || "";
   } catch {
-    markModel("base.en");
+    markModel("medium.en");
     markTheme("purple");
     selectedMic = "";
     paintHotkey("CommandOrControl+Shift+Space");
     markBackendMode("remote");
-    backendUrlInput.value = "http://127.0.0.1:3000";
+    backendUrlInput.value = "http://127.0.0.1:3003";
     apiKeyInput.value = "";
   }
   await loadMics();

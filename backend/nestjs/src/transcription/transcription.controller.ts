@@ -12,12 +12,14 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { ApiKeyGuard } from '../auth/api-key.guard';
+import { SessionsService } from '../sessions/sessions.service';
 import { TranscriptionService } from './transcription.service';
 
 @Controller()
 export class TranscriptionController {
   constructor(
     private readonly transcription: TranscriptionService,
+    private readonly sessions: SessionsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -45,10 +47,20 @@ export class TranscriptionController {
       throw new PayloadTooLargeException('payload too large');
     }
 
-    const result = await this.transcription.transcribePcm(
-      file.buffer,
-      modelName || model,
-    );
+    const chosenModel = modelName || model;
+    const result = await this.transcription.transcribePcm(file.buffer, chosenModel);
+
+    try {
+      await this.sessions.record({
+        pcmBytes: file.buffer.length,
+        sampleRate: this.config.get<number>('whisper.sampleRate') || 16000,
+        text: result.text || '',
+        model: chosenModel,
+      });
+    } catch {
+      // Stats logging must not fail the transcription response.
+    }
+
     return { text: result.text || '' };
   }
 }

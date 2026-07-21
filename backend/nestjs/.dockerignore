@@ -1,8 +1,10 @@
+data/
+.env
+*.db
+*.db-*
 node_modules
 dist
 tmp
 models
-.env
-.env.local
 *.log
 .git

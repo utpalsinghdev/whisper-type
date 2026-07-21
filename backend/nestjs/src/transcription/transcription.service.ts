@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { spawn } from 'child_process';
 import * as fs from 'fs';
@@ -40,7 +40,10 @@ export class TranscriptionService implements OnModuleInit {
   async onModuleInit() {
     fs.mkdirSync(this.modelPath, { recursive: true });
     fs.mkdirSync(this.tempDir, { recursive: true });
-    await this.ensureModel(this.currentModel);
+    // Download/load lazily on first transcription so /health + /dashboard start immediately.
+    this.logger.log(
+      `Whisper model "${this.currentModel}" will load on first transcription request`,
+    );
   }
 
   isModelLoaded(): boolean {
@@ -70,12 +73,11 @@ export class TranscriptionService implements OnModuleInit {
   }
 
   async transcribePcm(audioBuffer: Buffer, modelName?: string): Promise<TranscriptionResult> {
-    if (!this.modelReady) {
-      throw new ServiceUnavailableException('Whisper model not loaded yet');
-    }
+    const model = this.normalizeModelName(modelName || this.currentModel);
+    await this.ensureModel(model);
 
     // Serialize inference so a small VPS doesn't OOM on parallel jobs.
-    const run = this.queue.then(() => this.runTranscription(audioBuffer, modelName));
+    const run = this.queue.then(() => this.runTranscription(audioBuffer, model));
     this.queue = run.then(
       () => undefined,
       () => undefined,

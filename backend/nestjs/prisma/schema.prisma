@@ -1,0 +1,26 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model TranscriptionSession {
+  id         Int      @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+  durationMs Int      @default(0)
+  wordCount  Int      @default(0)
+  text       String   @default("")
+  model      String?
+
+  @@index([createdAt])
+}

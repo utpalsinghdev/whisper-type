@@ -148,7 +148,7 @@ struct AppSettings {
     /// "remote" (VPS / Docker NestJS) or "local" (spawn Python on this machine).
     #[serde(default = "default_backend_mode")]
     backend_mode: String,
-    /// Base URL for the remote NestJS backend, e.g. "http://127.0.0.1:3000".
+    /// Base URL for the remote NestJS backend, e.g. "http://127.0.0.1:3003".
     #[serde(default = "default_backend_url")]
     backend_url: String,
     /// Optional shared secret sent as X-API-Key.
@@ -161,13 +161,13 @@ fn default_backend_mode() -> String {
 }
 
 fn default_backend_url() -> String {
-    "http://127.0.0.1:3000".into()
+    "http://127.0.0.1:3003".into()
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            model: "base.en".into(),
+            model: "medium.en".into(),
             theme: "green".into(),
             mic_device: String::new(),
             hotkey: default_hotkey(),
@@ -1469,9 +1469,12 @@ fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
     let theme_menu = Submenu::with_items(app, "Theme", true, &theme_refs)?;
 
     let model_defs = [
-        ("base.en", "Base (recommended)"),
         ("tiny.en", "Tiny (fastest)"),
-        ("small.en", "Small (accurate)"),
+        ("base.en", "Base (light)"),
+        ("small.en", "Small (solid)"),
+        ("medium.en", "Medium (recommended)"),
+        ("large-v3-turbo", "Large Turbo (fast)"),
+        ("large-v3", "Large (max accuracy)"),
     ];
     let mut model_items = Vec::new();
     for (key, label) in model_defs {

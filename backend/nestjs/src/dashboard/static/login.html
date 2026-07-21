@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WishperType — Sign in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/dashboard/static/styles.css" />
+</head>
+<body>
+  <div class="login-page">
+    <aside class="login-brand" aria-hidden="false">
+      <div class="login-brand-mark">WishperType</div>
+      <div>
+        <h1>WishperType</h1>
+        <p>Speech turns into text on your VPS. This panel shows what the backend processed.</p>
+      </div>
+      <div class="login-brand-foot">ops · transcription · local sqlite</div>
+    </aside>
+
+    <main class="login-panel">
+      <div class="login-card">
+        <h2 id="title">Sign in</h2>
+        <p class="lede" id="subtitle">Use your admin email and password.</p>
+        <div class="notice" id="notice" role="status">Checking account status…</div>
+        <form id="form" action="#" method="post" novalidate>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="username" required placeholder="you@example.com" />
+          </div>
+          <div class="field">
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" minlength="6" required placeholder="At least 6 characters" />
+          </div>
+          <button class="btn btn-block" type="submit" id="submit">Sign in</button>
+          <div class="error" id="error" role="alert" aria-live="polite"></div>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const notice = document.getElementById('notice');
+    const title = document.getElementById('title');
+    const subtitle = document.getElementById('subtitle');
+    const error = document.getElementById('error');
+    const form = document.getElementById('form');
+    const submitBtn = document.getElementById('submit');
+
+    function errorText(data) {
+      if (!data) return 'Login failed';
+      if (typeof data.message === 'string') return data.message;
+      if (Array.isArray(data.message)) return data.message.join(', ');
+      return 'Login failed';
+    }
+
+    async function loadBootstrap() {
+      try {
+        const res = await fetch('/dashboard/api/bootstrap', { credentials: 'same-origin' });
+        const data = await res.json();
+        if (data.bootstrap) {
+          title.textContent = 'Create admin account';
+          subtitle.textContent = 'No account exists yet. This email and password become the only admin — no further signups.';
+          notice.className = 'notice warn';
+          notice.textContent = data.message;
+          submitBtn.textContent = 'Create account & continue';
+        } else {
+          notice.className = 'notice';
+          notice.textContent = data.message;
+          submitBtn.textContent = 'Sign in';
+        }
+      } catch {
+        notice.textContent = 'Could not reach the server.';
+      }
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      error.textContent = '';
+      submitBtn.disabled = true;
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      try {
+        const res = await fetch('/dashboard/api/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          error.textContent = errorText(data);
+          submitBtn.disabled = false;
+          return;
+        }
+        window.location.replace('/dashboard');
+      } catch {
+        error.textContent = 'Network error';
+        submitBtn.disabled = false;
+      }
+    });
+
+    loadBootstrap();
+  </script>
+</body>
+</html>

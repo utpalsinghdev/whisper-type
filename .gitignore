@@ -24,6 +24,12 @@ backend/wispertype/models/
 backend/wispertype/models/**
 backend/nestjs/models/
 backend/nestjs/tmp/
+backend/nestjs/data/
+backend/nestjs/.env
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.pt
 *.pt.part
 ggml-*.bin

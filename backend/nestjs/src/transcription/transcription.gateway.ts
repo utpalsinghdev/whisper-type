@@ -11,6 +11,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Server, Socket } from 'socket.io';
 import { TranscriptionService } from './transcription.service';
+import { SessionsService } from '../sessions/sessions.service';
 
 @WebSocketGateway({
   cors: { origin: true, credentials: true },
@@ -27,6 +28,7 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
 
   constructor(
     private readonly transcription: TranscriptionService,
+    private readonly sessions: SessionsService,
     private readonly config: ConfigService,
   ) {}
 
@@ -88,10 +90,18 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
 
     try {
       const pcm = Buffer.concat(list);
-      const result = await this.transcription.transcribePcm(
-        pcm,
-        this.models.get(client.id),
-      );
+      const model = this.models.get(client.id);
+      const result = await this.transcription.transcribePcm(pcm, model);
+      try {
+        await this.sessions.record({
+          pcmBytes: pcm.length,
+          sampleRate: this.config.get<number>('whisper.sampleRate') || 16000,
+          text: result.text || '',
+          model,
+        });
+      } catch {
+        /* ignore logging errors */
+      }
       client.emit('result', { text: result.text });
       return { ok: true, text: result.text };
     } catch (err) {

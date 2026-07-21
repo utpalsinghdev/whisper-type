@@ -43,9 +43,9 @@ let timerInterval  = null;
 let elapsedSeconds = 0;
 
 // ── Settings (fetched per session) ────────────────────────────────
-let apiBase   = "http://127.0.0.1:3000";
+let apiBase   = "http://127.0.0.1:3003";
 let apiKey    = "";
-let modelName = "base.en";
+let modelName = "medium.en";
 let micDevice = "";
 let themeKey  = "purple";   // default matches new purple accent
 
@@ -319,7 +319,7 @@ async function startSession() {
     // Load settings fresh each session
     try {
       const settings = await invoke("get_settings");
-      modelName = settings.model     || "base.en";
+      modelName = settings.model     || "medium.en";
       micDevice = settings.mic_device || "";
       apiKey    = settings.api_key    || "";
       applyTheme(settings.theme);
