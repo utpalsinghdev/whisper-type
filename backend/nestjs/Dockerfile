@@ -15,6 +15,8 @@ RUN git clone --depth 1 --branch v1.7.5 https://github.com/ggerganov/whisper.cpp
  && mkdir -p /whisper/bin /whisper/lib \
  && (cp build/bin/whisper-cli /whisper/bin/ 2>/dev/null \
      || cp build/bin/main /whisper/bin/whisper-cli) \
+ && (cp build/bin/whisper-server /whisper/bin/ 2>/dev/null \
+     || cp build/bin/server /whisper/bin/whisper-server) \
  && find build -name 'libwhisper*.so*' -exec cp -a {} /whisper/lib/ \; \
  && find build -name 'libggml*.so*' -exec cp -a {} /whisper/lib/ \; \
  && touch /whisper/lib/.keep
@@ -46,6 +48,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=whisper-builder /whisper/bin/whisper-cli /usr/local/bin/whisper-cli
+COPY --from=whisper-builder /whisper/bin/whisper-server /usr/local/bin/whisper-server
 COPY --from=whisper-builder /whisper/lib/ /usr/local/lib/
 RUN ldconfig
 
@@ -67,11 +70,17 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     DATABASE_PATH=/app/data/wishpertype.db \
     DATABASE_URL=file:/app/data/wishpertype.db \
-    WHISPER_MODEL=medium.en \
+    WHISPER_MODEL=base.en \
     WHISPER_MODEL_PATH=/app/models \
     WHISPER_THREADS=4 \
     WHISPER_LANGUAGE=en \
     WHISPER_BINARY=whisper-cli \
+    WHISPER_SERVER_BINARY=whisper-server \
+    WHISPER_SERVER_HOST=127.0.0.1 \
+    WHISPER_SERVER_PORT=8090 \
+    WHISPER_SERVER_ENABLED=true \
+    WHISPER_STREAM_CHUNK_SEC=5 \
+    WHISPER_STREAM_OVERLAP_SEC=1 \
     LD_LIBRARY_PATH=/usr/local/lib
 
 EXPOSE 3003

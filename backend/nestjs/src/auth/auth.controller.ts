@@ -8,12 +8,16 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Request, Response } from 'express';
 import { AuthService } from './auth.service';
 
 @Controller('dashboard/api')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly config: ConfigService,
+  ) {}
 
   @Get('bootstrap')
   async bootstrapStatus() {
@@ -73,6 +77,11 @@ export class AuthController {
     const token = (req as any).cookies?.[this.auth.getCookieName()];
     const user = this.auth.verifySessionToken(token);
     if (!user) throw new UnauthorizedException('Not logged in');
-    return { user };
+    const apiKey = this.config.get<string>('apiKey') || '';
+    return {
+      user,
+      apiKey,
+      apiKeyConfigured: Boolean(apiKey),
+    };
   }
 }

@@ -145,10 +145,13 @@ struct AppSettings {
     /// When false, global hotkey listeners are unregistered.
     #[serde(default = "default_hotkey_enabled")]
     hotkey_enabled: bool,
+    /// False until the user dismisses first-run setup ("Done").
+    #[serde(default)]
+    setup_complete: bool,
     /// "remote" (VPS / Docker NestJS) or "local" (spawn Python on this machine).
     #[serde(default = "default_backend_mode")]
     backend_mode: String,
-    /// Base URL for the remote NestJS backend, e.g. "http://127.0.0.1:3003".
+    /// Base URL for the remote NestJS backend, e.g. "https://whisper.the10x.xyz".
     #[serde(default = "default_backend_url")]
     backend_url: String,
     /// Optional shared secret sent as X-API-Key.
@@ -161,17 +164,18 @@ fn default_backend_mode() -> String {
 }
 
 fn default_backend_url() -> String {
-    "http://127.0.0.1:3003".into()
+    "https://whisper.the10x.xyz".into()
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            model: "medium.en".into(),
+            model: "base.en".into(),
             theme: "green".into(),
             mic_device: String::new(),
             hotkey: default_hotkey(),
             hotkey_enabled: true,
+            setup_complete: false,
             backend_mode: default_backend_mode(),
             backend_url: default_backend_url(),
             api_key: String::new(),
@@ -188,10 +192,20 @@ fn settings_path(app: &AppHandle) -> PathBuf {
 }
 
 fn load_settings(app: &AppHandle) -> AppSettings {
-    fs::read_to_string(settings_path(app))
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+    let path = settings_path(app);
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return AppSettings::default();
+    };
+    let mut settings: AppSettings = serde_json::from_str(&raw).unwrap_or_default();
+    // Older installs had a settings file but no setup_complete flag — treat as done
+    // so the settings window does not pop up every launch.
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+        if v.get("setup_complete").is_none() {
+            settings.setup_complete = true;
+            save_settings(app, &settings);
+        }
+    }
+    settings
 }
 
 fn save_settings(app: &AppHandle, settings: &AppSettings) {
@@ -783,6 +797,164 @@ fn set_api_key(app: AppHandle, key: String) {
     save_settings(&app, &settings);
 }
 
+/// Upload PCM from Rust so the desktop app is not blocked by browser CORS.
+#[tauri::command]
+fn transcribe_pcm(app: AppHandle, pcm: Vec<u8>, model_name: Option<String>) -> Result<String, String> {
+    if pcm.is_empty() {
+        return Ok(String::new());
+    }
+
+    let settings = load_settings(&app);
+    let base = api_base_from_settings(&settings);
+    let model = model_name
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| settings.model.clone());
+
+    let url = format!("{base}/transcribe_pcm_chunk");
+    let part = reqwest::blocking::multipart::Part::bytes(pcm)
+        .file_name("audio.pcm")
+        .mime_str("application/octet-stream")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::blocking::multipart::Form::new()
+        .text("model_name", model)
+        .part("files", part);
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let mut req = client.post(&url).multipart(form);
+    if !settings.api_key.is_empty() {
+        req = req.header("X-API-Key", &settings.api_key);
+    }
+
+    let res = req.send().map_err(|e| format!("Transcription request failed: {e}"))?;
+    let status = res.status();
+    let body = res.text().map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("Transcription error (HTTP {status}): {body}"));
+    }
+
+    let data: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Bad transcription response: {e}"))?;
+    Ok(data
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
+fn api_base_from_settings(settings: &AppSettings) -> String {
+    if using_remote_backend(settings) {
+        settings.backend_url.trim().trim_end_matches('/').to_string()
+    } else {
+        format!("http://127.0.0.1:{API_PORT}")
+    }
+}
+
+fn http_client() -> Result<reqwest::blocking::Client, String> {
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(300))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Begin a live streaming transcription session on the Nest backend.
+#[tauri::command]
+fn stream_start(app: AppHandle, model_name: Option<String>) -> Result<String, String> {
+    let settings = load_settings(&app);
+    let base = api_base_from_settings(&settings);
+    let model = model_name
+        .filter(|m| !m.trim().is_empty())
+        .unwrap_or_else(|| settings.model.clone());
+    let url = format!("{base}/transcribe_stream/start");
+    let client = http_client()?;
+    let mut req = client.post(&url).json(&serde_json::json!({ "model_name": model }));
+    if !settings.api_key.is_empty() {
+        req = req.header("X-API-Key", &settings.api_key);
+    }
+    let res = req.send().map_err(|e| format!("stream_start failed: {e}"))?;
+    let status = res.status();
+    let body = res.text().map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("stream_start HTTP {status}: {body}"));
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Bad stream_start response: {e}"))?;
+    data.get("sessionId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("stream_start missing sessionId: {body}"))
+}
+
+/// Push a PCM chunk while the user is still speaking.
+#[tauri::command]
+fn stream_chunk(app: AppHandle, session_id: String, pcm: Vec<u8>) -> Result<String, String> {
+    if pcm.is_empty() {
+        return Ok(String::new());
+    }
+    let settings = load_settings(&app);
+    let base = api_base_from_settings(&settings);
+    let url = format!("{base}/transcribe_stream/chunk");
+    let part = reqwest::blocking::multipart::Part::bytes(pcm)
+        .file_name("chunk.pcm")
+        .mime_str("application/octet-stream")
+        .map_err(|e| e.to_string())?;
+    let form = reqwest::blocking::multipart::Form::new()
+        .text("session_id", session_id)
+        .part("files", part);
+    let client = http_client()?;
+    let mut req = client.post(&url).multipart(form);
+    if !settings.api_key.is_empty() {
+        req = req.header("X-API-Key", &settings.api_key);
+    }
+    let res = req.send().map_err(|e| format!("stream_chunk failed: {e}"))?;
+    let status = res.status();
+    let body = res.text().map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("stream_chunk HTTP {status}: {body}"));
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Bad stream_chunk response: {e}"))?;
+    Ok(data
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
+/// Finish a live stream and return the full merged transcript.
+#[tauri::command]
+fn stream_end(app: AppHandle, session_id: String) -> Result<String, String> {
+    let settings = load_settings(&app);
+    let base = api_base_from_settings(&settings);
+    let url = format!("{base}/transcribe_stream/end");
+    let client = http_client()?;
+    let mut req = client
+        .post(&url)
+        .json(&serde_json::json!({ "session_id": session_id }));
+    if !settings.api_key.is_empty() {
+        req = req.header("X-API-Key", &settings.api_key);
+    }
+    let res = req.send().map_err(|e| format!("stream_end failed: {e}"))?;
+    let status = res.status();
+    let body = res.text().map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("stream_end HTTP {status}: {body}"));
+    }
+    let data: serde_json::Value =
+        serde_json::from_str(&body).map_err(|e| format!("Bad stream_end response: {e}"))?;
+    Ok(data
+        .get("text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string())
+}
+
 #[tauri::command]
 fn check_accessibility() -> bool {
     #[cfg(target_os = "macos")]
@@ -841,6 +1013,10 @@ fn open_settings(pane: String) {
 
 #[tauri::command]
 fn finish_setup(app: AppHandle) {
+    let mut settings = load_settings(&app);
+    settings.setup_complete = true;
+    save_settings(&app, &settings);
+
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
     }
@@ -1647,6 +1823,10 @@ pub fn run() {
             set_backend_mode,
             set_backend_url,
             set_api_key,
+            transcribe_pcm,
+            stream_start,
+            stream_chunk,
+            stream_end,
             report_mics,
             ensure_model
         ])
@@ -1660,13 +1840,28 @@ pub fn run() {
             }
 
             if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_focus();
+                let settings = load_settings(app.handle());
+                if settings.setup_complete {
+                    let _ = win.hide();
+                } else {
+                    // First launch — show onboarding once.
+                    #[cfg(target_os = "macos")]
+                    let _ = app.handle().set_activation_policy(tauri::ActivationPolicy::Regular);
+                    let _ = win.show();
+                    let _ = win.set_focus();
+                }
                 // Closing the settings window should hide it (so it can be
                 // reopened from the tray), not destroy it or quit the app.
                 let handle = app.handle().clone();
                 win.on_window_event(move |event| {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
+                        // Closing via the window chrome also counts as finishing first-run.
+                        let mut settings = load_settings(&handle);
+                        if !settings.setup_complete {
+                            settings.setup_complete = true;
+                            save_settings(&handle, &settings);
+                        }
                         if let Some(w) = handle.get_webview_window("main") {
                             let _ = w.hide();
                         }

@@ -16,12 +16,12 @@
     "windows": [
       {
         "label": "main",
-        "title": "WishperType Setup",
+        "title": "WishperType Settings",
         "url": "setup.html",
-        "width": 480,
-        "height": 780,
+        "width": 520,
+        "height": 520,
         "resizable": false,
-        "visible": true,
+        "visible": false,
         "center": true
       },
       {

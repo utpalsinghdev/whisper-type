@@ -17,22 +17,27 @@ curl http://127.0.0.1:3003/health
 open http://127.0.0.1:3003/dashboard
 ```
 
-First boot downloads the configured ggml model (default `medium.en`) into the `whisper_models` volume.
+First boot downloads the configured ggml model (default `base.en`) into the `whisper_models` volume, then starts **whisper-server** so the model stays warm in RAM.
+
+## Performance
+
+- **Warm model:** Nest spawns `whisper-server` on loopback `:8090` and keeps weights loaded. Requests hit `/inference` instead of reloading via `whisper-cli` each time.
+- **Live chunks:** Desktop app opens `/transcribe_stream/start`, uploads ~5s PCM chunks while you speak, and `/transcribe_stream/end` flushes the remainder. After Stop you mostly wait for the last window.
 
 ## Models (VPS)
 
 | Model | Approx size | Notes |
 |-------|-------------|--------|
 | `tiny.en` | ~75 MB | Fastest, least accurate |
-| `base.en` | ~142 MB | Light |
+| `base.en` | ~142 MB | **Default** — good CPU speed |
 | `small.en` | ~466 MB | Good balance |
-| `medium.en` | ~1.5 GB | **Default** — strong accuracy on 16GB RAM |
+| `medium.en` | ~1.5 GB | Stronger accuracy on 16GB RAM |
 | `large-v3-turbo` | ~1.6 GB | Near-large quality, faster |
 | `large-v3` | ~3 GB | Max accuracy; fine with 16GB RAM + swap |
 
 Set `WHISPER_MODEL` in `.env` / compose, or pick in the desktop app (remote mode downloads on the server on first use).
 
-With 4 CPU cores keep `WHISPER_THREADS=4`.
+With 4 CPU cores keep `WHISPER_THREADS=4`. Optional: `WHISPER_STREAM_CHUNK_SEC=5`, `WHISPER_SERVER_ENABLED=true`.
 
 ## Dashboard login
 

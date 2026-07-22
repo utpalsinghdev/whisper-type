@@ -15,19 +15,22 @@
       background: #0c0c0e;
       color: #e4e4e7;
       padding: 0;
+      width: 100vw;
       height: 100vh;
-      overflow-y: auto;
-      overflow-x: hidden;
+      overflow: hidden;
       -webkit-user-select: none;
       user-select: none;
     }
 
-    /* ── scrollable content area ── */
+    /* ── square content: scroll inside the fixed window ── */
     .page {
-      padding: 22px 20px 12px;
+      height: 100%;
+      padding: 16px 16px 10px;
       display: flex;
       flex-direction: column;
       gap: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
 
     /* ── header ── */
@@ -57,7 +60,7 @@
     .subtitle {
       font-size: 12px;
       color: #71717a;
-      margin-bottom: 18px;
+      margin-bottom: 12px;
       margin-left: 42px;
       line-height: 1.4;
     }
@@ -69,7 +72,7 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: #52525b;
-      margin: 14px 0 6px;
+      margin: 10px 0 5px;
     }
 
     /* ── card ── */
@@ -77,8 +80,8 @@
       background: #18181b;
       border: 1px solid #27272a;
       border-radius: 12px;
-      padding: 13px 14px;
-      margin-bottom: 8px;
+      padding: 11px 12px;
+      margin-bottom: 6px;
     }
 
     /* permission card head */
@@ -384,9 +387,9 @@
         <button type="button" data-mode="local">Local<small>Python on Mac</small></button>
       </div>
       <label class="card-desc" for="backendUrl" style="display:block;margin-bottom:6px;">Backend URL</label>
-      <input id="backendUrl" type="url" placeholder="http://127.0.0.1:3003" style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
-      <label class="card-desc" for="apiKeyInput" style="display:block;margin-bottom:6px;">API key (optional)</label>
-      <input id="apiKeyInput" type="password" placeholder="Same as API_KEY on the server" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
+      <input id="backendUrl" type="url" placeholder="https://whisper.the10x.xyz" style="width:100%;box-sizing:border-box;margin-bottom:10px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
+      <label class="card-desc" for="apiKeyInput" style="display:block;margin-bottom:6px;">API key</label>
+      <input id="apiKeyInput" type="password" placeholder="Same as API_KEY on the VPS" autocomplete="off" style="width:100%;box-sizing:border-box;margin-bottom:8px;padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:rgba(0,0,0,0.25);color:inherit;font:inherit;" />
       <div class="model-note" id="backendNote"></div>
     </div>
 

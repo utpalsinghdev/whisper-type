@@ -309,6 +309,68 @@ a:hover { text-decoration: underline; }
   font-weight: 500;
 }
 
+.api-key-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.api-key-copy .label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.api-key-copy .hint {
+  margin: 0.3rem 0 0;
+  max-width: 52ch;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.api-key-copy .hint code {
+  font-family: var(--mono);
+  font-size: 0.8em;
+  color: var(--primary);
+}
+
+.api-key-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-shrink: 0;
+}
+
+.api-key-value {
+  display: inline-block;
+  min-width: 12ch;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 720px) {
+  .api-key-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .api-key-actions {
+    justify-content: space-between;
+  }
+}
+
 /* Metrics as one instrument strip — not three identical cards */
 .metrics {
   display: grid;

@@ -648,7 +648,7 @@ async function loadSettings() {
     selectedMic = s.mic_device || "";
     paintHotkey(s.hotkey || "CommandOrControl+Shift+Space");
     markBackendMode(s.backend_mode || "remote");
-    backendUrlInput.value = s.backend_url || "http://127.0.0.1:3003";
+    backendUrlInput.value = s.backend_url || "https://whisper.the10x.xyz";
     apiKeyInput.value = s.api_key || "";
   } catch {
     markModel("medium.en");
@@ -656,7 +656,7 @@ async function loadSettings() {
     selectedMic = "";
     paintHotkey("CommandOrControl+Shift+Space");
     markBackendMode("remote");
-    backendUrlInput.value = "http://127.0.0.1:3003";
+    backendUrlInput.value = "https://whisper.the10x.xyz";
     apiKeyInput.value = "";
   }
   await loadMics();

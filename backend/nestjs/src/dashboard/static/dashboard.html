@@ -23,6 +23,17 @@
       <button class="btn btn-ghost" type="button" id="logout">Log out</button>
     </header>
 
+    <section class="api-key-bar" aria-label="API key">
+      <div class="api-key-copy">
+        <div class="label">API key</div>
+        <p class="hint">Use this in the WishperType desktop app (Settings → Backend). Rebuilds don’t change it unless you edit <code>API_KEY</code> in <code>.env</code>.</p>
+      </div>
+      <div class="api-key-actions">
+        <code class="api-key-value" id="apiKeyValue" title="">—</code>
+        <button class="btn btn-ghost" type="button" id="copyApiKey" disabled>Copy</button>
+      </div>
+    </section>
+
     <section class="metrics" aria-label="Totals">
       <div class="metric">
         <div class="label">Audio processed</div>
@@ -85,10 +96,23 @@
       }
     }
 
+    function maskKey(key) {
+      if (!key) return 'Not set';
+      if (key.length <= 12) return '••••••••';
+      return `${key.slice(0, 8)}…${key.slice(-6)}`;
+    }
+
     async function load() {
       const me = await api('/dashboard/api/me');
       document.getElementById('who').innerHTML =
         `Signed in as <strong>${esc(me.user.email)}</strong>`;
+
+      const keyEl = document.getElementById('apiKeyValue');
+      const copyBtn = document.getElementById('copyApiKey');
+      window.__apiKey = me.apiKey || '';
+      keyEl.textContent = maskKey(window.__apiKey);
+      keyEl.title = me.apiKeyConfigured ? 'Hidden — use Copy' : 'API_KEY is empty on the server';
+      copyBtn.disabled = !me.apiKeyConfigured;
 
       const stats = await api('/dashboard/api/stats');
       document.getElementById('audioTotal').textContent = stats.totalAudioLabel;
@@ -121,6 +145,20 @@
         </article>
       `).join('');
     }
+
+    document.getElementById('copyApiKey').addEventListener('click', async () => {
+      const key = window.__apiKey || '';
+      const btn = document.getElementById('copyApiKey');
+      if (!key) return;
+      try {
+        await navigator.clipboard.writeText(key);
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+      } catch {
+        btn.textContent = 'Failed';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 1600);
+      }
+    });
 
     document.getElementById('logout').addEventListener('click', async () => {
       await fetch('/dashboard/api/logout', { method: 'POST', credentials: 'same-origin' });

@@ -16,10 +16,13 @@ services:
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       - DATABASE_PATH=/app/data/wishpertype.db
       - DATABASE_URL=file:/app/data/wishpertype.db
-      - WHISPER_MODEL=${WHISPER_MODEL:-medium.en}
+      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
       - WHISPER_MODEL_PATH=/app/models
       - WHISPER_THREADS=${WHISPER_THREADS:-4}
       - WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
+      - WHISPER_SERVER_ENABLED=${WHISPER_SERVER_ENABLED:-true}
+      - WHISPER_STREAM_CHUNK_SEC=${WHISPER_STREAM_CHUNK_SEC:-5}
+      - WHISPER_STREAM_OVERLAP_SEC=${WHISPER_STREAM_OVERLAP_SEC:-1}
       - CORS_ORIGIN=${CORS_ORIGIN:-tauri://localhost,http://tauri.localhost,http://localhost:1420,http://localhost:3003}
       - MAX_UPLOAD_BYTES=${MAX_UPLOAD_BYTES:-26214400}
       - TRANSCRIBE_TIMEOUT_MS=${TRANSCRIBE_TIMEOUT_MS:-300000}

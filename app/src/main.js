@@ -32,10 +32,15 @@ const stopBtn    = document.getElementById("stopBtn");
 const TARGET_RATE   = 16_000;   // Whisper expects 16 kHz
 const CHUNK_SAMPLES = 1_024;
 const TAIL_MS       = 600;      // extra silence captured after "stop"
+/** Flush ~5s of PCM to the server while still recording. */
+const STREAM_FLUSH_SAMPLES = TARGET_RATE * 5;
 
 // ── Session state ─────────────────────────────────────────────────
 let state          = "idle"; // idle | recording | transcribing
 let recordedChunks = [];
+let pendingStream  = [];     // Int16 chunks not yet uploaded
+let streamSessionId = null;
+let streamFlushChain = Promise.resolve();
 let audioContext, processor, source, analyser, stream;
 let freqData, timeData;
 let vizFrame       = null;
@@ -43,9 +48,8 @@ let timerInterval  = null;
 let elapsedSeconds = 0;
 
 // ── Settings (fetched per session) ────────────────────────────────
-let apiBase   = "http://127.0.0.1:3003";
-let apiKey    = "";
-let modelName = "medium.en";
+let apiBase   = "https://whisper.the10x.xyz";
+let modelName = "base.en";
 let micDevice = "";
 let themeKey  = "purple";   // default matches new purple accent
 
@@ -222,15 +226,41 @@ function downsample(buf, fromRate, toRate) {
   return out;
 }
 
-function mergeRecording() {
-  const total  = recordedChunks.reduce((n, c) => n + c.length, 0);
+function mergeInt16(chunks) {
+  const total  = chunks.reduce((n, c) => n + c.length, 0);
   const merged = new Int16Array(total);
   let offset   = 0;
-  for (const chunk of recordedChunks) {
+  for (const chunk of chunks) {
     merged.set(chunk, offset);
     offset += chunk.length;
   }
   return merged;
+}
+
+function mergeRecording() {
+  return mergeInt16(recordedChunks);
+}
+
+function pendingSampleCount() {
+  return pendingStream.reduce((n, c) => n + c.length, 0);
+}
+
+function queueStreamFlush(force = false) {
+  if (!streamSessionId) return;
+  if (!force && pendingSampleCount() < STREAM_FLUSH_SAMPLES) return;
+
+  const chunks = pendingStream;
+  pendingStream = [];
+  if (!chunks.length) return;
+
+  const pcm = mergeInt16(chunks);
+  const bytes = Array.from(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+  const sessionId = streamSessionId;
+  streamFlushChain = streamFlushChain
+    .then(() => invoke("stream_chunk", { sessionId, pcm: bytes }))
+    .catch((err) => {
+      console.warn("[WishperType] stream_chunk failed:", err);
+    });
 }
 
 function teardownAudio() {
@@ -243,9 +273,6 @@ function teardownAudio() {
   timeData = null;
 }
 
-// ─────────────────────────────────────────────────────────────────
-//  Mic enumeration (reported to Rust for tray dropdown)
-// ─────────────────────────────────────────────────────────────────
 async function reportMics() {
   try {
     const devs   = await navigator.mediaDevices.enumerateDevices();
@@ -263,41 +290,36 @@ async function reportMics() {
 //  Transcription
 // ─────────────────────────────────────────────────────────────────
 async function transcribeRecording() {
+  // Prefer live stream session (chunks already sent while speaking).
+  if (streamSessionId) {
+    try {
+      queueStreamFlush(true);
+      await streamFlushChain;
+      const text = await invoke("stream_end", { sessionId: streamSessionId });
+      streamSessionId = null;
+      return (text || "").trim();
+    } catch (err) {
+      console.warn("[WishperType] stream_end failed, falling back to batch:", err);
+      streamSessionId = null;
+    }
+  }
+
   if (recordedChunks.length === 0) return "";
 
-  const pcm  = mergeRecording();
-  const form = new FormData();
-  form.append("model_name", modelName);
-  form.append(
-    "files",
-    new Blob([pcm.buffer], { type: "application/octet-stream" }),
-    "audio.pcm"
-  );
-
-  const headers = {};
-  if (apiKey) headers["X-API-Key"] = apiKey;
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
+  const pcm = mergeRecording();
+  const bytes = Array.from(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
   try {
-    const res = await fetch(`${apiBase}/transcribe_pcm_chunk`, {
-      method:  "POST",
-      body:    form,
-      headers,
-      signal:  controller.signal,
+    const text = await invoke("transcribe_pcm", {
+      pcm: bytes,
+      modelName,
     });
-    if (!res.ok) throw new Error(`Transcription error (HTTP ${res.status})`);
-
-    const data = await res.json();
-    return (data.text || "").trim();
+    return (text || "").trim();
   } catch (err) {
-    if (err.name === "AbortError") {
-      throw new Error("Transcription timed out — try a shorter clip or Tiny model");
+    const msg = String(err?.message || err || "");
+    if (/timed?\s*out|timeout/i.test(msg)) {
+      throw new Error("Transcription timed out — try a shorter clip or a smaller model");
     }
-    throw err;
-  } finally {
-    clearTimeout(timeout);
+    throw err instanceof Error ? err : new Error(msg || "Transcription failed");
   }
 }
 
@@ -308,6 +330,9 @@ async function startSession() {
   if (state !== "idle") return;
   state          = "recording";
   recordedChunks = [];
+  pendingStream  = [];
+  streamSessionId = null;
+  streamFlushChain = Promise.resolve();
 
   // Immediately show recording UI
   setPillState("recording");
@@ -319,16 +344,22 @@ async function startSession() {
     // Load settings fresh each session
     try {
       const settings = await invoke("get_settings");
-      modelName = settings.model     || "medium.en";
+      modelName = settings.model     || "base.en";
       micDevice = settings.mic_device || "";
-      apiKey    = settings.api_key    || "";
       applyTheme(settings.theme);
     } catch { /* use defaults */ }
 
-    // Ensure server is alive (remote health-check, or spawn local Python)
+    // Ensure remote VPS is reachable (or spawn local Python)
     await invoke("ensure_server");
     apiBase = await invoke("api_base");
-    try { apiKey = await invoke("get_api_key") || apiKey; } catch { /* ignore */ }
+
+    // Open a live stream session so chunks transcribe while speaking.
+    try {
+      streamSessionId = await invoke("stream_start", { modelName });
+    } catch (err) {
+      console.warn("[WishperType] stream_start failed; will batch on stop:", err);
+      streamSessionId = null;
+    }
 
     // Open microphone
     const audioConstraint = micDevice ? { deviceId: { exact: micDevice } } : true;
@@ -370,7 +401,10 @@ async function startSession() {
       if (state !== "recording") return;
       const input = e.inputBuffer.getChannelData(0);
       const down  = downsample(input, audioContext.sampleRate, TARGET_RATE);
-      recordedChunks.push(floatTo16BitPCM(down));
+      const pcm16 = floatTo16BitPCM(down);
+      recordedChunks.push(pcm16);
+      pendingStream.push(pcm16);
+      queueStreamFlush(false);
     };
 
     resizeViz();
@@ -426,6 +460,12 @@ async function cancelSession() {
   stopViz();
   if (wasRecording) teardownAudio();
   recordedChunks = [];
+  pendingStream = [];
+  if (streamSessionId) {
+    const id = streamSessionId;
+    streamSessionId = null;
+    invoke("stream_end", { sessionId: id }).catch(() => {});
+  }
 
   resetUI();
   await invoke("hide_capsule");
@@ -437,6 +477,12 @@ async function abortSession(reason) {
   stopViz();
   teardownAudio();
   recordedChunks = [];
+  pendingStream = [];
+  if (streamSessionId) {
+    const id = streamSessionId;
+    streamSessionId = null;
+    invoke("stream_end", { sessionId: id }).catch(() => {});
+  }
 
   setPillState("error-state");
   showStatus(reason || "Error", true);

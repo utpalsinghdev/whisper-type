@@ -90,22 +90,18 @@ export class SessionsService {
   }
 }
 
+/** Compact labels: `45s`, `1m 26s`, `1h 2m`. */
 export function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.round(ms / 1000));
   const hours = Math.floor(totalSec / 3600);
   const minutes = Math.floor((totalSec % 3600) / 60);
   const seconds = totalSec % 60;
 
-  const parts: string[] = [];
   if (hours > 0) {
-    parts.push(`${hours} ${hours === 1 ? 'hour' : 'hours'}`);
+    return `${hours}h ${minutes}m`;
   }
-  if (minutes > 0 || hours > 0) {
-    parts.push(`${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`);
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
   }
-  parts.push(`${seconds} ${seconds === 1 ? 'second' : 'seconds'}`);
-
-  if (parts.length === 1) return parts[0];
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts[0]}, ${parts[1]} and ${parts[2]}`;
+  return `${seconds}s`;
 }
