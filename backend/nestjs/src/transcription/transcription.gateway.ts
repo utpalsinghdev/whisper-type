@@ -64,7 +64,7 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   @SubscribeMessage('audio:chunk')
-  async onChunk(
+  onChunk(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { audio?: number[] | ArrayBuffer | Buffer },
   ) {
@@ -73,9 +73,8 @@ export class TranscriptionGateway implements OnGatewayConnection, OnGatewayDisco
     const chunk = Buffer.isBuffer(data.audio)
       ? data.audio
       : Buffer.from(data.audio as ArrayBuffer);
-    const result = await this.streams.pushChunk(sessionId, chunk);
-    if (result.text) client.emit('partial', { text: result.text });
-    return { ok: true, bytes: chunk.length, text: result.text };
+    const result = this.streams.pushChunk(sessionId, chunk);
+    return { ok: true, bytes: chunk.length, queued: result.queued };
   }
 
   @SubscribeMessage('session:end')

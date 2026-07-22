@@ -5520,6 +5520,7 @@ name = "wishper-type"
 version = "0.1.2"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "device_query",
  "enigo",
  "macos-accessibility-client",

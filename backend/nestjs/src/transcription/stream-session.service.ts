@@ -12,6 +12,7 @@ interface LiveSession {
   pcm: Buffer;
   flushedBytes: number;
   text: string;
+  /** Background transcription chain — never awaited by pushChunk. */
   chain: Promise<void>;
   createdAt: number;
 }
@@ -31,8 +32,8 @@ export class StreamSessionService {
     private readonly config: ConfigService,
   ) {
     this.sampleRate = this.config.get<number>('whisper.sampleRate') || 16000;
-    const chunkSec = this.config.get<number>('whisper.streamChunkSec') || 5;
-    const overlapSec = this.config.get<number>('whisper.streamOverlapSec') || 1;
+    const chunkSec = this.config.get<number>('whisper.streamChunkSec') || 4;
+    const overlapSec = this.config.get<number>('whisper.streamOverlapSec') || 0.75;
     this.chunkBytes = Math.max(1, Math.round(chunkSec * this.sampleRate) * 2);
     this.overlapBytes = Math.max(0, Math.round(overlapSec * this.sampleRate) * 2);
   }
@@ -52,9 +53,13 @@ export class StreamSessionService {
     return { sessionId: id };
   }
 
-  async pushChunk(sessionId: string, chunk: Buffer): Promise<{ ok: boolean; text: string }> {
+  /**
+   * Buffer audio and return immediately. Whisper runs in the background so the
+   * desktop UI / waveform never waits on inference during recording.
+   */
+  pushChunk(sessionId: string, chunk: Buffer): { ok: boolean; queued: number } {
     const session = this.require(sessionId);
-    if (!chunk?.length) return { ok: true, text: session.text };
+    if (!chunk?.length) return { ok: true, queued: 0 };
 
     session.pcm = Buffer.concat([session.pcm, chunk]);
     session.chain = session.chain
@@ -62,8 +67,8 @@ export class StreamSessionService {
       .catch((err) => {
         this.logger.warn(`Stream flush error: ${(err as Error).message}`);
       });
-    await session.chain;
-    return { ok: true, text: session.text };
+
+    return { ok: true, queued: chunk.length };
   }
 
   async end(sessionId: string): Promise<{ text: string }> {
@@ -98,7 +103,7 @@ export class StreamSessionService {
     while (session.pcm.length - session.flushedBytes >= this.chunkBytes) {
       const end = session.flushedBytes + this.chunkBytes;
       const start = Math.max(0, session.flushedBytes - this.overlapBytes);
-      const window = session.pcm.subarray(start, end);
+      const window = Buffer.from(session.pcm.subarray(start, end));
       const result = await this.transcription.transcribePcm(window, session.model);
       session.text = mergeTranscript(session.text, result.text || '');
       session.flushedBytes = end;
@@ -108,8 +113,8 @@ export class StreamSessionService {
   private async flushRemainder(session: LiveSession): Promise<void> {
     if (session.pcm.length <= session.flushedBytes) return;
     const start = Math.max(0, session.flushedBytes - this.overlapBytes);
-    const window = session.pcm.subarray(start);
-    if (window.length < this.sampleRate * 2 * 0.35) return;
+    const window = Buffer.from(session.pcm.subarray(start));
+    if (window.length < this.sampleRate * 2 * 0.3) return;
     const result = await this.transcription.transcribePcm(window, session.model);
     session.text = mergeTranscript(session.text, result.text || '');
     session.flushedBytes = session.pcm.length;

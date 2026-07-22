@@ -30,10 +30,11 @@ const stopBtn    = document.getElementById("stopBtn");
 
 // ── Audio constants ───────────────────────────────────────────────
 const TARGET_RATE   = 16_000;   // Whisper expects 16 kHz
-const CHUNK_SAMPLES = 1_024;
-const TAIL_MS       = 600;      // extra silence captured after "stop"
-/** Flush ~5s of PCM to the server while still recording. */
-const STREAM_FLUSH_SAMPLES = TARGET_RATE * 5;
+const CHUNK_SAMPLES = 4_096;    // larger buffer = fewer main-thread audio callbacks
+const TAIL_MS       = 350;
+/** Upload ~4s of PCM while still recording (server transcribes in background). */
+const STREAM_FLUSH_SAMPLES = TARGET_RATE * 4;
+const STREAM_FLUSH_EVERY_MS = 900;
 
 // ── Session state ─────────────────────────────────────────────────
 let state          = "idle"; // idle | recording | transcribing
@@ -41,6 +42,7 @@ let recordedChunks = [];
 let pendingStream  = [];     // Int16 chunks not yet uploaded
 let streamSessionId = null;
 let streamFlushChain = Promise.resolve();
+let streamFlushTimer = null;
 let audioContext, processor, source, analyser, stream;
 let freqData, timeData;
 let vizFrame       = null;
@@ -245,6 +247,24 @@ function pendingSampleCount() {
   return pendingStream.reduce((n, c) => n + c.length, 0);
 }
 
+/** Encode Int16 PCM as base64 without building a giant number[] for IPC. */
+function int16ToBase64(pcm) {
+  const bytes = new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength);
+  const step = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += step) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + step, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function stopStreamFlushTimer() {
+  if (streamFlushTimer) {
+    clearInterval(streamFlushTimer);
+    streamFlushTimer = null;
+  }
+}
+
 function queueStreamFlush(force = false) {
   if (!streamSessionId) return;
   if (!force && pendingSampleCount() < STREAM_FLUSH_SAMPLES) return;
@@ -254,13 +274,22 @@ function queueStreamFlush(force = false) {
   if (!chunks.length) return;
 
   const pcm = mergeInt16(chunks);
-  const bytes = Array.from(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+  const pcmB64 = int16ToBase64(pcm);
   const sessionId = streamSessionId;
+
+  // Chain uploads so order is preserved, but never touch the audio callback.
   streamFlushChain = streamFlushChain
-    .then(() => invoke("stream_chunk", { sessionId, pcm: bytes }))
+    .then(() => invoke("stream_chunk", { sessionId, pcmB64 }))
     .catch((err) => {
       console.warn("[WishperType] stream_chunk failed:", err);
     });
+}
+
+function startStreamFlushTimer() {
+  stopStreamFlushTimer();
+  streamFlushTimer = setInterval(() => {
+    if (state === "recording") queueStreamFlush(false);
+  }, STREAM_FLUSH_EVERY_MS);
 }
 
 function teardownAudio() {
@@ -292,15 +321,15 @@ async function reportMics() {
 async function transcribeRecording() {
   // Prefer live stream session (chunks already sent while speaking).
   if (streamSessionId) {
+    const sessionId = streamSessionId;
+    streamSessionId = null;
     try {
       queueStreamFlush(true);
       await streamFlushChain;
-      const text = await invoke("stream_end", { sessionId: streamSessionId });
-      streamSessionId = null;
+      const text = await invoke("stream_end", { sessionId });
       return (text || "").trim();
     } catch (err) {
       console.warn("[WishperType] stream_end failed, falling back to batch:", err);
-      streamSessionId = null;
     }
   }
 
@@ -333,15 +362,15 @@ async function startSession() {
   pendingStream  = [];
   streamSessionId = null;
   streamFlushChain = Promise.resolve();
+  stopStreamFlushTimer();
 
-  // Immediately show recording UI
+  // Show recording UI immediately — never wait on network first.
   setPillState("recording");
   showWaveform();
   stopBtn.classList.remove("hidden");
   startTimer();
 
   try {
-    // Load settings fresh each session
     try {
       const settings = await invoke("get_settings");
       modelName = settings.model     || "base.en";
@@ -349,35 +378,32 @@ async function startSession() {
       applyTheme(settings.theme);
     } catch { /* use defaults */ }
 
-    // Ensure remote VPS is reachable (or spawn local Python)
-    await invoke("ensure_server");
-    apiBase = await invoke("api_base");
-
-    // Open a live stream session so chunks transcribe while speaking.
-    try {
-      streamSessionId = await invoke("stream_start", { modelName });
-    } catch (err) {
-      console.warn("[WishperType] stream_start failed; will batch on stop:", err);
-      streamSessionId = null;
-    }
-
-    // Open microphone
+    // Mic + remote setup in parallel so the capsule feels instant.
     const audioConstraint = micDevice ? { deviceId: { exact: micDevice } } : true;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraint, video: false });
-    } catch {
-      // Chosen device gone — fall back to system default
-      if (micDevice) {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-      } else {
-        throw new Error("Microphone unavailable");
-      }
-    }
+    const micPromise = navigator.mediaDevices.getUserMedia({
+      audio: audioConstraint,
+      video: false,
+    }).catch(async () => {
+      if (!micDevice) throw new Error("Microphone unavailable");
+      return navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    });
 
-    // Enumerate now that we have permission (labels populated)
+    const setupPromise = (async () => {
+      try { await invoke("ensure_server"); } catch { /* ignore */ }
+      try { apiBase = await invoke("api_base"); } catch { /* ignore */ }
+      try {
+        streamSessionId = await invoke("stream_start", { modelName });
+      } catch (err) {
+        console.warn("[WishperType] stream_start failed; will batch on stop:", err);
+        streamSessionId = null;
+      }
+    })();
+
+    stream = await micPromise;
+    await setupPromise;
+
     reportMics();
 
-    // Audio graph: source → analyser → scriptProcessor → silent gain → destination
     audioContext = new AudioContext();
     if (audioContext.state === "suspended") await audioContext.resume();
 
@@ -397,16 +423,17 @@ async function startSession() {
     processor.connect(silent);
     silent.connect(audioContext.destination);
 
+    // Audio callback must stay tiny — only buffer samples. Uploads run on a timer.
     processor.onaudioprocess = (e) => {
       if (state !== "recording") return;
       const input = e.inputBuffer.getChannelData(0);
       const down  = downsample(input, audioContext.sampleRate, TARGET_RATE);
       const pcm16 = floatTo16BitPCM(down);
       recordedChunks.push(pcm16);
-      pendingStream.push(pcm16);
-      queueStreamFlush(false);
+      if (streamSessionId) pendingStream.push(pcm16);
     };
 
+    startStreamFlushTimer();
     resizeViz();
     startViz();
 
@@ -420,17 +447,15 @@ async function finishSession() {
   if (state !== "recording") return;
   state = "transcribing";
 
-  // Stop recording + timer
+  // Flip to transcribing UI first so Stop never feels “stuck” on the waveform.
+  stopStreamFlushTimer();
   stopTimer();
   stopViz();
-  teardownAudio();
-
-  // Show transcribing UI
   setPillState("transcribing");
   showDots();
   stopBtn.classList.add("hidden");
+  teardownAudio();
 
-  // Brief tail pause so the very last word isn't cut off
   await new Promise(r => setTimeout(r, TAIL_MS));
 
   try {
@@ -445,6 +470,7 @@ async function finishSession() {
     await new Promise(r => setTimeout(r, 1_200));
   } finally {
     recordedChunks = [];
+    pendingStream = [];
     state = "idle";
     resetUI();
     await invoke("hide_capsule");
@@ -456,6 +482,7 @@ async function cancelSession() {
   const wasRecording = state === "recording";
   state = "idle";
 
+  stopStreamFlushTimer();
   stopTimer();
   stopViz();
   if (wasRecording) teardownAudio();
@@ -473,6 +500,7 @@ async function cancelSession() {
 
 async function abortSession(reason) {
   state = "idle";
+  stopStreamFlushTimer();
   stopTimer();
   stopViz();
   teardownAudio();

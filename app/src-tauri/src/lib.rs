@@ -890,11 +890,20 @@ fn stream_start(app: AppHandle, model_name: Option<String>) -> Result<String, St
 }
 
 /// Push a PCM chunk while the user is still speaking.
+/// `pcm_b64` is base64 of raw int16 LE PCM — avoids huge JSON number arrays in IPC.
 #[tauri::command]
-fn stream_chunk(app: AppHandle, session_id: String, pcm: Vec<u8>) -> Result<String, String> {
-    if pcm.is_empty() {
-        return Ok(String::new());
+fn stream_chunk(app: AppHandle, session_id: String, pcm_b64: String) -> Result<(), String> {
+    use base64::Engine;
+    if pcm_b64.is_empty() {
+        return Ok(());
     }
+    let pcm = base64::engine::general_purpose::STANDARD
+        .decode(pcm_b64.as_bytes())
+        .map_err(|e| format!("bad pcm base64: {e}"))?;
+    if pcm.is_empty() {
+        return Ok(());
+    }
+
     let settings = load_settings(&app);
     let base = api_base_from_settings(&settings);
     let url = format!("{base}/transcribe_stream/chunk");
@@ -905,25 +914,24 @@ fn stream_chunk(app: AppHandle, session_id: String, pcm: Vec<u8>) -> Result<Stri
     let form = reqwest::blocking::multipart::Form::new()
         .text("session_id", session_id)
         .part("files", part);
-    let client = http_client()?;
+
+    // Uploads are fast now (server buffers only). Keep timeout short so a stall
+    // cannot freeze the desktop IPC for minutes.
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
     let mut req = client.post(&url).multipart(form);
     if !settings.api_key.is_empty() {
         req = req.header("X-API-Key", &settings.api_key);
     }
     let res = req.send().map_err(|e| format!("stream_chunk failed: {e}"))?;
     let status = res.status();
-    let body = res.text().map_err(|e| e.to_string())?;
     if !status.is_success() {
+        let body = res.text().unwrap_or_default();
         return Err(format!("stream_chunk HTTP {status}: {body}"));
     }
-    let data: serde_json::Value =
-        serde_json::from_str(&body).map_err(|e| format!("Bad stream_chunk response: {e}"))?;
-    Ok(data
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string())
+    Ok(())
 }
 
 /// Finish a live stream and return the full merged transcript.
