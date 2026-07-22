@@ -23,8 +23,11 @@ export default () => ({
     serverHost: process.env.WHISPER_SERVER_HOST || '127.0.0.1',
     serverPort: parseInt(process.env.WHISPER_SERVER_PORT || '8090', 10),
     serverEnabled: process.env.WHISPER_SERVER_ENABLED || 'true',
-    streamChunkSec: parseFloat(process.env.WHISPER_STREAM_CHUNK_SEC || '5'),
-    streamOverlapSec: parseFloat(process.env.WHISPER_STREAM_OVERLAP_SEC || '1'),
+    // Buffer-by-default: no mid-recording Whisper (faster Stop on CPU base.en).
+    streamMode: process.env.WHISPER_STREAM_MODE || 'buffer',
+    streamChunkSec: parseFloat(process.env.WHISPER_STREAM_CHUNK_SEC || '3'),
+    streamOverlapSec: parseFloat(process.env.WHISPER_STREAM_OVERLAP_SEC || '0.5'),
     timeoutMs: parseInt(process.env.TRANSCRIBE_TIMEOUT_MS || '300000', 10),
   },
 });
+

@@ -32,10 +32,10 @@ const stopBtn    = document.getElementById("stopBtn");
 const TARGET_RATE   = 16_000;   // Whisper expects 16 kHz
 const CHUNK_SAMPLES = 4_096;    // larger buffer = fewer main-thread audio callbacks
 /** Keep mic open this long after Stop so the last words aren't cut off. */
-const TAIL_MS       = 700;
+const TAIL_MS       = 400;
 /** Upload ~4s windows while speaking; server merges them incrementally. */
-const STREAM_FLUSH_SAMPLES = TARGET_RATE * 4;
-const STREAM_FLUSH_EVERY_MS = 1000;
+const STREAM_FLUSH_SAMPLES = TARGET_RATE * 3;
+const STREAM_FLUSH_EVERY_MS = 800;
 
 // ── Session state ─────────────────────────────────────────────────
 // idle | recording | trailing (post-stop tail capture) | transcribing

@@ -99,11 +99,15 @@ export class TranscriptionService implements OnModuleInit {
     this.modelReady = true;
   }
 
-  async transcribePcm(audioBuffer: Buffer, modelName?: string): Promise<TranscriptionResult> {
+  async transcribePcm(
+    audioBuffer: Buffer,
+    modelName?: string,
+    opts?: { prompt?: string },
+  ): Promise<TranscriptionResult> {
     const model = this.normalizeModelName(modelName || this.currentModel);
     await this.ensureModelFile(model);
 
-    const run = this.queue.then(() => this.runTranscription(audioBuffer, model));
+    const run = this.queue.then(() => this.runTranscription(audioBuffer, model, opts?.prompt));
     this.queue = run.then(
       () => undefined,
       () => undefined,
@@ -114,13 +118,13 @@ export class TranscriptionService implements OnModuleInit {
   private async runTranscription(
     audioBuffer: Buffer,
     model: string,
+    prompt?: string,
   ): Promise<TranscriptionResult> {
     if (!audioBuffer?.length) return { text: '', language: this.language };
 
-    // Prefer warm whisper-server (model already in RAM).
     try {
       await this.whisperServer.ensureStarted(model);
-      const text = await this.inferViaServer(audioBuffer);
+      const text = await this.inferViaServer(audioBuffer, prompt);
       this.currentModel = model;
       this.modelReady = true;
       return { text: text.trim(), language: this.language };
@@ -128,11 +132,11 @@ export class TranscriptionService implements OnModuleInit {
       this.logger.warn(
         `Warm server inference failed (${(err as Error).message}); falling back to whisper-cli`,
       );
-      return this.inferViaCli(audioBuffer, model);
+      return this.inferViaCli(audioBuffer, model, prompt);
     }
   }
 
-  private async inferViaServer(pcm: Buffer): Promise<string> {
+  private async inferViaServer(pcm: Buffer, prompt?: string): Promise<string> {
     const wav = pcmToWavBuffer(pcm, this.sampleRate);
     const boundary = `----wt${Date.now()}${Math.random().toString(16).slice(2)}`;
     const fileHeader = Buffer.from(
@@ -140,9 +144,16 @@ export class TranscriptionService implements OnModuleInit {
         `Content-Disposition: form-data; name="file"; filename="audio.wav"\r\n` +
         `Content-Type: audio/wav\r\n\r\n`,
     );
+    const promptPart = prompt
+      ? `--${boundary}\r\nContent-Disposition: form-data; name="prompt"\r\n\r\n${prompt}\r\n`
+      : '';
     const fields = Buffer.from(
       `\r\n--${boundary}\r\nContent-Disposition: form-data; name="response_format"\r\n\r\njson\r\n` +
         `--${boundary}\r\nContent-Disposition: form-data; name="temperature"\r\n\r\n0.0\r\n` +
+        // Greedy decode — much faster than default beam search on CPU.
+        `--${boundary}\r\nContent-Disposition: form-data; name="beam_size"\r\n\r\n1\r\n` +
+        `--${boundary}\r\nContent-Disposition: form-data; name="best_of"\r\n\r\n1\r\n` +
+        promptPart +
         `--${boundary}--\r\n`,
     );
     const body = Buffer.concat([fileHeader, wav, fields]);
@@ -191,13 +202,16 @@ export class TranscriptionService implements OnModuleInit {
         return data.transcription.map((s: { text?: string }) => s.text || '').join('');
       }
     } catch {
-      // Some builds return plain text
       if (raw.trim()) return raw.trim();
     }
     return '';
   }
 
-  private async inferViaCli(audioBuffer: Buffer, model: string): Promise<TranscriptionResult> {
+  private async inferViaCli(
+    audioBuffer: Buffer,
+    model: string,
+    prompt?: string,
+  ): Promise<TranscriptionResult> {
     const id = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const pcmFile = path.join(this.tempDir, `${id}.pcm`);
     const wavFile = path.join(this.tempDir, `${id}.wav`);
@@ -216,11 +230,18 @@ export class TranscriptionService implements OnModuleInit {
         this.language,
         '-t',
         String(this.threads),
+        '-bs',
+        '1',
+        '-bo',
+        '1',
         '-nt',
         '-oj',
         '-of',
         outPrefix,
       ];
+      if (prompt) {
+        args.push('--prompt', prompt);
+      }
 
       await this.runCommand(this.binary, args, this.timeoutMs);
       const text = this.readTranscript(`${outPrefix}.json`, `${outPrefix}.txt`);

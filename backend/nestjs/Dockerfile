@@ -6,10 +6,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
+# Build on the target VPS with native CPU flags (faster base.en). Cross-builds
+# for foreign arches should pass --build-arg GGML_NATIVE=OFF.
+ARG GGML_NATIVE=ON
 RUN git clone --depth 1 --branch v1.7.5 https://github.com/ggerganov/whisper.cpp.git . \
  && cmake -B build \
       -DWHISPER_BUILD_TESTS=OFF \
-      -DGGML_NATIVE=OFF \
+      -DGGML_NATIVE=${GGML_NATIVE} \
       -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build -j"$(nproc)" --config Release \
  && mkdir -p /whisper/bin /whisper/lib \
@@ -79,8 +82,9 @@ ENV NODE_ENV=production \
     WHISPER_SERVER_HOST=127.0.0.1 \
     WHISPER_SERVER_PORT=8090 \
     WHISPER_SERVER_ENABLED=true \
-    WHISPER_STREAM_CHUNK_SEC=5 \
-    WHISPER_STREAM_OVERLAP_SEC=1 \
+    WHISPER_STREAM_MODE=buffer \
+    WHISPER_STREAM_CHUNK_SEC=3 \
+    WHISPER_STREAM_OVERLAP_SEC=0.5 \
     LD_LIBRARY_PATH=/usr/local/lib
 
 EXPOSE 3003
