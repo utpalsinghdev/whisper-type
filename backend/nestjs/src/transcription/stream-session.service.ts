@@ -8,9 +8,11 @@ import { mergeTranscript } from './wav.util';
 interface LiveSession {
   id: string;
   model?: string;
-  /** Growing PCM buffer for this live dictation. */
+  /** Full PCM received for this dictation (master on server). */
   pcm: Buffer;
+  /** Bytes already folded into `text` via completed windows. */
   flushedBytes: number;
+  /** Incrementally merged transcript — only the tail is unfinished at Stop. */
   text: string;
   /** Background transcription chain — never awaited by pushChunk. */
   chain: Promise<void>;
@@ -114,7 +116,8 @@ export class StreamSessionService {
     if (session.pcm.length <= session.flushedBytes) return;
     const start = Math.max(0, session.flushedBytes - this.overlapBytes);
     const window = Buffer.from(session.pcm.subarray(start));
-    if (window.length < this.sampleRate * 2 * 0.3) return;
+    // Always keep a short final slice — dropping <0.3s was truncating last words.
+    if (window.length < this.sampleRate * 2 * 0.08) return;
     const result = await this.transcription.transcribePcm(window, session.model);
     session.text = mergeTranscript(session.text, result.text || '');
     session.flushedBytes = session.pcm.length;

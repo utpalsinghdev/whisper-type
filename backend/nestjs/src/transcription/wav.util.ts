@@ -34,7 +34,7 @@ export function mergeTranscript(prev: string, next: string): string {
   const aWords = a.split(/\s+/);
   const bWords = b.split(/\s+/);
   const max = Math.min(aWords.length, bWords.length, 12);
-  for (let n = max; n >= 2; n--) {
+  for (let n = max; n >= 1; n--) {
     const tail = aWords.slice(-n).join(' ').toLowerCase();
     const head = bWords.slice(0, n).join(' ').toLowerCase();
     if (tail === head) {

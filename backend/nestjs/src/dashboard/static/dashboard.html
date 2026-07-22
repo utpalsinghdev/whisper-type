@@ -141,7 +141,7 @@
             <span>${s.wordCount} words</span>
             ${s.model ? `<span class="pill">${esc(s.model)}</span>` : ''}
           </div>
-          <div class="session-text">${esc(s.text || '(empty)')}</div>
+          <div class="session-text" title="${esc(s.text || '')}">${esc(s.text || '(empty)')}</div>
         </article>
       `).join('');
     }

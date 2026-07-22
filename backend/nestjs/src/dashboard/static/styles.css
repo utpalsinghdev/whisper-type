@@ -487,11 +487,15 @@ a:hover { text-decoration: underline; }
 
 .session-text {
   max-width: 72ch;
-  white-space: pre-wrap;
   color: var(--ink);
   font-size: 0.95rem;
   line-height: 1.55;
-  text-wrap: pretty;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 .empty {

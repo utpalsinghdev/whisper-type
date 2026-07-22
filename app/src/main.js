@@ -31,18 +31,30 @@ const stopBtn    = document.getElementById("stopBtn");
 // ── Audio constants ───────────────────────────────────────────────
 const TARGET_RATE   = 16_000;   // Whisper expects 16 kHz
 const CHUNK_SAMPLES = 4_096;    // larger buffer = fewer main-thread audio callbacks
-const TAIL_MS       = 350;
-/** Upload ~4s of PCM while still recording (server transcribes in background). */
+/** Keep mic open this long after Stop so the last words aren't cut off. */
+const TAIL_MS       = 700;
+/** Upload ~4s windows while speaking; server merges them incrementally. */
 const STREAM_FLUSH_SAMPLES = TARGET_RATE * 4;
-const STREAM_FLUSH_EVERY_MS = 900;
+const STREAM_FLUSH_EVERY_MS = 1000;
 
 // ── Session state ─────────────────────────────────────────────────
-let state          = "idle"; // idle | recording | transcribing
-let recordedChunks = [];
-let pendingStream  = [];     // Int16 chunks not yet uploaded
+// idle | recording | trailing (post-stop tail capture) | transcribing
+let state = "idle";
+
+/**
+ * Three parallel stores (never discard the master until the session ends):
+ *  1) masterChunks  — full original PCM
+ *  2) uploadedSamples — how far into master we've already sent
+ *  3) server-side partial transcript (merged on VPS as windows finish)
+ */
+let masterChunks = [];
+let uploadedSamples = 0;
 let streamSessionId = null;
-let streamFlushChain = Promise.resolve();
+let uploadChain = Promise.resolve();
 let streamFlushTimer = null;
+let uploading = false; // prevent overlapping encode work on the main thread
+let vizTick = 0;
+
 let audioContext, processor, source, analyser, stream;
 let freqData, timeData;
 let vizFrame       = null;
@@ -157,6 +169,8 @@ function startViz() {
 
 function drawViz() {
   vizFrame = requestAnimationFrame(drawViz);
+  // Half-rate draw keeps the capsule smooth while ScriptProcessor also runs.
+  if ((++vizTick & 1) === 1) return;
 
   const w = viz.width;
   const h = viz.height;
@@ -164,7 +178,6 @@ function drawViz() {
 
   if (!analyser) return;
 
-  // ── waveform line ──
   analyser.getByteTimeDomainData(timeData);
   const accentColor = getComputedStyle(pill).getPropertyValue("--accent").trim()
     || THEMES[themeKey] || "#a855f7";
@@ -181,9 +194,8 @@ function drawViz() {
   }
   vizCtx.stroke();
 
-  // ── frequency bars ──
   analyser.getByteFrequencyData(freqData);
-  const bars = 28;
+  const bars = 24;
   const gap  = 2 * devicePixelRatio;
   const barW = (w - gap * (bars - 1)) / bars;
   const step = Math.max(1, Math.floor(freqData.length / bars));
@@ -228,23 +240,32 @@ function downsample(buf, fromRate, toRate) {
   return out;
 }
 
-function mergeInt16(chunks) {
-  const total  = chunks.reduce((n, c) => n + c.length, 0);
-  const merged = new Int16Array(total);
-  let offset   = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
+function masterSampleCount() {
+  return masterChunks.reduce((n, c) => n + c.length, 0);
+}
+
+/** Slice [start, end) samples from the master store without mutating it. */
+function sliceMaster(start, end) {
+  const len = Math.max(0, end - start);
+  const out = new Int16Array(len);
+  if (!len) return out;
+
+  let cursor = 0;
+  let wrote = 0;
+  for (const chunk of masterChunks) {
+    const next = cursor + chunk.length;
+    if (next <= start) {
+      cursor = next;
+      continue;
+    }
+    if (cursor >= end) break;
+    const from = Math.max(0, start - cursor);
+    const to = Math.min(chunk.length, end - cursor);
+    out.set(chunk.subarray(from, to), wrote);
+    wrote += to - from;
+    cursor = next;
   }
-  return merged;
-}
-
-function mergeRecording() {
-  return mergeInt16(recordedChunks);
-}
-
-function pendingSampleCount() {
-  return pendingStream.reduce((n, c) => n + c.length, 0);
+  return out;
 }
 
 /** Encode Int16 PCM as base64 without building a giant number[] for IPC. */
@@ -265,30 +286,63 @@ function stopStreamFlushTimer() {
   }
 }
 
-function queueStreamFlush(force = false) {
-  if (!streamSessionId) return;
-  if (!force && pendingSampleCount() < STREAM_FLUSH_SAMPLES) return;
+/**
+ * Upload complete windows from the master cursor.
+ * force=true also uploads a short remainder (used on Stop).
+ */
+function scheduleUploads(force = false) {
+  if (!streamSessionId || uploading) return;
 
-  const chunks = pendingStream;
-  pendingStream = [];
-  if (!chunks.length) return;
+  const total = masterSampleCount();
+  const available = total - uploadedSamples;
+  if (!force && available < STREAM_FLUSH_SAMPLES) return;
+  if (available <= 0) return;
 
-  const pcm = mergeInt16(chunks);
-  const pcmB64 = int16ToBase64(pcm);
+  uploading = true;
   const sessionId = streamSessionId;
 
-  // Chain uploads so order is preserved, but never touch the audio callback.
-  streamFlushChain = streamFlushChain
-    .then(() => invoke("stream_chunk", { sessionId, pcmB64 }))
-    .catch((err) => {
+  const pump = async () => {
+    try {
+      while (streamSessionId === sessionId) {
+        const totalNow = masterSampleCount();
+        const avail = totalNow - uploadedSamples;
+        if (avail <= 0) break;
+
+        let size;
+        if (force) {
+          size = avail;
+        } else if (avail >= STREAM_FLUSH_SAMPLES) {
+          size = STREAM_FLUSH_SAMPLES;
+        } else {
+          break;
+        }
+
+        const start = uploadedSamples;
+        const end = start + size;
+        uploadedSamples = end;
+
+        const pcm = sliceMaster(start, end);
+        // Yield so waveform RAF can run between encode bursts.
+        await new Promise((r) => setTimeout(r, 0));
+        const pcmB64 = int16ToBase64(pcm);
+        await invoke("stream_chunk", { sessionId, pcmB64 });
+
+        if (!force) break; // one window per timer tick keeps UI light
+      }
+    } catch (err) {
       console.warn("[WishperType] stream_chunk failed:", err);
-    });
+    } finally {
+      uploading = false;
+    }
+  };
+
+  uploadChain = uploadChain.then(pump, pump);
 }
 
 function startStreamFlushTimer() {
   stopStreamFlushTimer();
   streamFlushTimer = setInterval(() => {
-    if (state === "recording") queueStreamFlush(false);
+    if (state === "recording" || state === "trailing") scheduleUploads(false);
   }, STREAM_FLUSH_EVERY_MS);
 }
 
@@ -315,34 +369,44 @@ async function reportMics() {
   } catch { /* ignore */ }
 }
 
-// ─────────────────────────────────────────────────────────────────
-//  Transcription
-// ─────────────────────────────────────────────────────────────────
-async function transcribeRecording() {
-  // Prefer live stream session (chunks already sent while speaking).
+async function batchTranscribeMaster() {
+  const total = masterSampleCount();
+  if (!total) return "";
+  const pcm = sliceMaster(0, total);
+  const bytes = Array.from(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
+  const text = await invoke("transcribe_pcm", { pcm: bytes, modelName });
+  return (text || "").trim();
+}
+
+async function finalizeStreamOrBatch() {
   if (streamSessionId) {
     const sessionId = streamSessionId;
-    streamSessionId = null;
     try {
-      queueStreamFlush(true);
-      await streamFlushChain;
+      // Drain any in-flight upload, then send every remaining master sample.
+      while (uploading) {
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      scheduleUploads(true);
+      await uploadChain;
+      while (uploading) {
+        await new Promise((r) => setTimeout(r, 40));
+      }
+      if (masterSampleCount() > uploadedSamples) {
+        scheduleUploads(true);
+        await uploadChain;
+      }
+
+      streamSessionId = null;
       const text = await invoke("stream_end", { sessionId });
       return (text || "").trim();
     } catch (err) {
-      console.warn("[WishperType] stream_end failed, falling back to batch:", err);
+      console.warn("[WishperType] stream finalize failed, falling back to batch:", err);
+      streamSessionId = null;
     }
   }
 
-  if (recordedChunks.length === 0) return "";
-
-  const pcm = mergeRecording();
-  const bytes = Array.from(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength));
   try {
-    const text = await invoke("transcribe_pcm", {
-      pcm: bytes,
-      modelName,
-    });
-    return (text || "").trim();
+    return await batchTranscribeMaster();
   } catch (err) {
     const msg = String(err?.message || err || "");
     if (/timed?\s*out|timeout/i.test(msg)) {
@@ -352,19 +416,24 @@ async function transcribeRecording() {
   }
 }
 
+function resetStreamState() {
+  stopStreamFlushTimer();
+  masterChunks = [];
+  uploadedSamples = 0;
+  streamSessionId = null;
+  uploadChain = Promise.resolve();
+  uploading = false;
+}
+
 // ─────────────────────────────────────────────────────────────────
 //  Session lifecycle
 // ─────────────────────────────────────────────────────────────────
 async function startSession() {
   if (state !== "idle") return;
-  state          = "recording";
-  recordedChunks = [];
-  pendingStream  = [];
-  streamSessionId = null;
-  streamFlushChain = Promise.resolve();
-  stopStreamFlushTimer();
+  state = "recording";
+  resetStreamState();
+  uploadChain = Promise.resolve();
 
-  // Show recording UI immediately — never wait on network first.
   setPillState("recording");
   showWaveform();
   stopBtn.classList.remove("hidden");
@@ -378,7 +447,6 @@ async function startSession() {
       applyTheme(settings.theme);
     } catch { /* use defaults */ }
 
-    // Mic + remote setup in parallel so the capsule feels instant.
     const audioConstraint = micDevice ? { deviceId: { exact: micDevice } } : true;
     const micPromise = navigator.mediaDevices.getUserMedia({
       audio: audioConstraint,
@@ -423,14 +491,12 @@ async function startSession() {
     processor.connect(silent);
     silent.connect(audioContext.destination);
 
-    // Audio callback must stay tiny — only buffer samples. Uploads run on a timer.
+    // Tiny callback: append to master only. Never network / encode here.
     processor.onaudioprocess = (e) => {
-      if (state !== "recording") return;
+      if (state !== "recording" && state !== "trailing") return;
       const input = e.inputBuffer.getChannelData(0);
       const down  = downsample(input, audioContext.sampleRate, TARGET_RATE);
-      const pcm16 = floatTo16BitPCM(down);
-      recordedChunks.push(pcm16);
-      if (streamSessionId) pendingStream.push(pcm16);
+      masterChunks.push(floatTo16BitPCM(down));
     };
 
     startStreamFlushTimer();
@@ -445,21 +511,24 @@ async function startSession() {
 
 async function finishSession() {
   if (state !== "recording") return;
-  state = "transcribing";
 
-  // Flip to transcribing UI first so Stop never feels “stuck” on the waveform.
+  // 1) Keep capturing a short tail so the last words aren't truncated.
+  state = "trailing";
   stopStreamFlushTimer();
-  stopTimer();
-  stopViz();
+  stopBtn.classList.add("hidden");
   setPillState("transcribing");
   showDots();
-  stopBtn.classList.add("hidden");
+  stopTimer();
+
+  await new Promise((r) => setTimeout(r, TAIL_MS));
+
+  // 2) Now stop the mic for real and finalize uploads + merge.
+  state = "transcribing";
+  stopViz();
   teardownAudio();
 
-  await new Promise(r => setTimeout(r, TAIL_MS));
-
   try {
-    const text = await transcribeRecording();
+    const text = await finalizeStreamOrBatch();
     if (text) {
       await invoke("paste_text", { text });
     }
@@ -469,8 +538,7 @@ async function finishSession() {
     setPillState("error-state");
     await new Promise(r => setTimeout(r, 1_200));
   } finally {
-    recordedChunks = [];
-    pendingStream = [];
+    resetStreamState();
     state = "idle";
     resetUI();
     await invoke("hide_capsule");
@@ -479,20 +547,16 @@ async function finishSession() {
 
 async function cancelSession() {
   if (state === "idle") return;
-  const wasRecording = state === "recording";
+  const hadAudio = state === "recording" || state === "trailing";
   state = "idle";
 
-  stopStreamFlushTimer();
   stopTimer();
   stopViz();
-  if (wasRecording) teardownAudio();
-  recordedChunks = [];
-  pendingStream = [];
-  if (streamSessionId) {
-    const id = streamSessionId;
-    streamSessionId = null;
-    invoke("stream_end", { sessionId: id }).catch(() => {});
-  }
+  if (hadAudio) teardownAudio();
+
+  const id = streamSessionId;
+  resetStreamState();
+  if (id) invoke("stream_end", { sessionId: id }).catch(() => {});
 
   resetUI();
   await invoke("hide_capsule");
@@ -500,17 +564,13 @@ async function cancelSession() {
 
 async function abortSession(reason) {
   state = "idle";
-  stopStreamFlushTimer();
   stopTimer();
   stopViz();
   teardownAudio();
-  recordedChunks = [];
-  pendingStream = [];
-  if (streamSessionId) {
-    const id = streamSessionId;
-    streamSessionId = null;
-    invoke("stream_end", { sessionId: id }).catch(() => {});
-  }
+
+  const id = streamSessionId;
+  resetStreamState();
+  if (id) invoke("stream_end", { sessionId: id }).catch(() => {});
 
   setPillState("error-state");
   showStatus(reason || "Error", true);
@@ -566,7 +626,7 @@ await listen("server-error",  async (ev) => {
 // ─────────────────────────────────────────────────────────────────
 try {
   getCurrentWindow().onResized(() => {
-    if (state === "recording") resizeViz();
+    if (state === "recording" || state === "trailing") resizeViz();
   });
 } catch { /* unavailable in some builds */ }
 
